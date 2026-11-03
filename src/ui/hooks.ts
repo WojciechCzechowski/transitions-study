@@ -1,0 +1,58 @@
+import { useCallback, useEffect, useRef, useState, type RefCallback } from 'react';
+
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+/** Live `prefers-reduced-motion` value. */
+export function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() => typeof matchMedia === 'function' && matchMedia(REDUCED_MOTION).matches);
+  useEffect(() => {
+    const mq = matchMedia(REDUCED_MOTION);
+    const onChange = () => setReduced(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return reduced;
+}
+
+// --- input modality ---------------------------------------------------------
+// Focus-driven previews should only start when focus came from the keyboard,
+// so opening the gallery with a click doesn't start a preview before hover.
+
+let lastInput: 'keyboard' | 'pointer' = 'pointer';
+let installed = false;
+
+export function installModalityTracking() {
+  if (installed || typeof window === 'undefined') return;
+  installed = true;
+  window.addEventListener('keydown', () => (lastInput = 'keyboard'), true);
+  window.addEventListener('pointerdown', () => (lastInput = 'pointer'), true);
+}
+
+export const lastInputWasKeyboard = () => lastInput === 'keyboard';
+
+/** Width of an element, tracked with ResizeObserver. */
+export function useElementWidth<T extends HTMLElement>(): [RefCallback<T>, number] {
+  const [width, setWidth] = useState(0);
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: T | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setWidth(w);
+    });
+    ro.observe(el);
+    observer.current = ro;
+    setWidth(el.getBoundingClientRect().width);
+  }, []);
+  return [ref, width];
+}
+
+/** Polite live-region announcements; repeating the same text still re-announces. */
+export function useAnnouncer() {
+  const [message, setMessage] = useState({ text: '', n: 0 });
+  const announce = useCallback((text: string) => setMessage((m) => ({ text, n: m.n + 1 })), []);
+  return [message, announce] as const;
+}
