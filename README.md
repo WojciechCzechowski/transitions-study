@@ -32,7 +32,11 @@ The demo uses three videos from [Pexels](https://www.pexels.com), free to use un
 
 ## Deploying
 
-Build where the clips are, then upload the build: `npm run build` copies `public/clips` into `dist`, for example `npx wrangler pages deploy dist` for Cloudflare Pages. A host that builds from the git repo has no clips, because they are not committed. Cloudflare Pages limits each file to 25 MiB, so keep each clip under that (shorter clips, or a higher CRF in `scripts/lib.mjs`).
+The clips are not committed, so a host that builds from the git repo has none. There are two ways around that.
+
+**Clips hosted elsewhere (git deploys work).** Put `manifest.json` and the clips in a bucket (for example Cloudflare R2), allow CORS `GET` from the site's origin, and set `VITE_CLIPS_BASE_URL` to the bucket's URL in the build environment. Without the variable the app loads from `/clips/` on its own origin.
+
+**Upload a local build.** Build where the clips are: `npm run build` copies `public/clips` into `dist`, then upload it, for example `npx wrangler pages deploy dist` for Cloudflare Pages. Pages limits each file to 25 MiB, so keep each clip under that (shorter clips, or a higher CRF in `scripts/lib.mjs`).
 
 ## Where things are
 

@@ -4,7 +4,13 @@
  */
 import type { ClipLayout } from '../model/timeline';
 
-export const CLIPS_BASE_URL = '/clips/';
+/**
+ * Where the manifest and clips are served from. Defaults to `public/clips`
+ * on the same origin; set `VITE_CLIPS_BASE_URL` at build time to load them
+ * from elsewhere (for example an R2 bucket, which must allow CORS).
+ */
+const clipsBase = import.meta.env.VITE_CLIPS_BASE_URL?.trim() || '/clips/';
+export const CLIPS_BASE_URL = clipsBase.endsWith('/') ? clipsBase : `${clipsBase}/`;
 export const MANIFEST_URL = `${CLIPS_BASE_URL}manifest.json`;
 
 /**

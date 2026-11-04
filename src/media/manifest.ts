@@ -44,7 +44,7 @@ export async function loadManifest(signal: AbortSignal): Promise<Manifest> {
     throw new StudyError('network', 'Could not fetch the clip manifest.', 'manifest.json', HINT);
   }
   if (looksMissing(res)) {
-    throw new StudyError('manifest', 'public/clips/manifest.json was not found.', 'manifest.json', HINT);
+    throw new StudyError('manifest', `${MANIFEST_URL} was not found.`, 'manifest.json', HINT);
   }
   let data: unknown;
   try {
@@ -118,7 +118,7 @@ export async function fetchClip(
     throw new StudyError('network', 'Could not reach the clip file.', file, HINT);
   }
   if (looksMissing(res)) {
-    throw new StudyError('not-found', `public/clips/${file} was not found (HTTP ${res.status}).`, file, HINT);
+    throw new StudyError('not-found', `${clipUrl(file)} was not found (HTTP ${res.status}).`, file, HINT);
   }
   const total = declaredLength(res);
   onProgress(0, total);
