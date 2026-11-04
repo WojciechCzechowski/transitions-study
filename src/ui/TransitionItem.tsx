@@ -36,6 +36,8 @@ interface Props {
   /** Discrete duration change (keyboard). Returns how it was clamped. */
   onStepDuration: (requested: Frames) => { readonly clamped: ClampResult['clamped'] };
   announce: (text: string) => void;
+  /** Announce and show a toast with Undo (clips trimmed to make room). */
+  notify: (text: string) => void;
 }
 
 interface DragState {
@@ -47,6 +49,8 @@ interface DragState {
   announcedLimit: boolean;
   /** Frames trimmed off the clips (since the drag began) to make room. */
   trimmed: Room;
+  /** The duration the drag has reached. */
+  duration: Frames;
 }
 
 /** A transition on one cut: click selects, the edges resize it symmetrically. */
@@ -92,7 +96,7 @@ export function TransitionItem(props: Props) {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     e.currentTarget.focus({ preventScroll: true });
-    drag.current = { edge, pointerId: e.pointerId, startX: e.clientX, startDuration: t.duration, baseDoc: doc, announcedLimit: false, trimmed: NO_ROOM };
+    drag.current = { edge, pointerId: e.pointerId, startX: e.clientX, startDuration: t.duration, baseDoc: doc, announcedLimit: false, trimmed: NO_ROOM, duration: t.duration };
     setDragEdge(edge);
     setLimitHit(null);
     setStepped(false);
@@ -113,6 +117,7 @@ export function TransitionItem(props: Props) {
     if (r.clamped !== 'max') d.announcedLimit = false;
     const next = setDuration(d.baseDoc, cut.key, r.duration);
     d.trimmed = next.trimmed;
+    d.duration = r.duration;
     props.gesture.update(next.doc);
   };
 
@@ -124,7 +129,7 @@ export function TransitionItem(props: Props) {
     setLimitHit(null);
     props.gesture.end('Change duration');
     props.onGestureActive(false);
-    if (d.trimmed !== NO_ROOM) props.announce(describeTrim(cut, d.trimmed));
+    if (d.trimmed !== NO_ROOM) props.notify(describeTrim(cut, d.trimmed, d.duration));
   };
 
   const onEdgeKey = (edge: Edge) => (e: KeyboardEvent) => {

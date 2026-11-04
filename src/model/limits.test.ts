@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cutAt, generous, limitsAt, makeDoc, noHandleB, shortB, tooShortB } from './fixtures';
-import { describeLimit, describeNoHandles, describeTrim } from './messages';
+import { describeLimit, describeNoHandles, describeTrim, describeTrimWarning } from './messages';
 import { applyTransition, setDuration } from './ops';
 import { clampDuration } from './timeline';
 
@@ -113,10 +113,34 @@ describe('limit messages', () => {
     expect(msg).not.toContain('Clip A');
   });
 
-  it('says what making room trimmed', () => {
+  /** The messages keep each "0.60 s (18 f)" together with no-break spaces; compare as plain text. */
+  const plain = (m: string) => m.replace(/\u00a0/g, ' ');
+
+  it('says what making room trimmed, and why', () => {
+    expect(describeTrim(cutAt(shortB()), { a: 0, b: 21 }, 78)).toContain('0.60\u00a0s\u00a0(18\u00a0f)');
     const cut = cutAt(shortB());
-    expect(describeTrim(cut, { a: 12, b: 6 })).toBe('Trimmed Clip A by 12 f and Clip B by 6 f to make room.');
-    expect(describeTrim(cut, { a: 0, b: 6 })).toBe('Trimmed Clip B by 6 f to make room.');
-    expect(describeTrim(cut, { a: 0, b: 0 })).toBe('');
+    expect(plain(describeTrim(cut, { a: 0, b: 21 }, 78))).toBe(
+      'Trimmed right clip by 0.70 s (21 f) to make room: Clip B has only 0.60 s (18 f) of footage before its start, ' +
+        'and a centred 2.60 s (78 f) transition needs 1.30 s (39 f) on each side.',
+    );
+    expect(plain(describeTrim(cut, { a: 4, b: 21 }, 78))).toBe(
+      'Trimmed left clip by 0.13 s (4 f) and right clip by 0.70 s (21 f) to make room: ' +
+        'Clip A has only 1.17 s (35 f) of footage after its end and Clip B has only 0.60 s (18 f) of footage before its start, ' +
+        'and a centred 2.60 s (78 f) transition needs 1.30 s (39 f) on each side.',
+    );
+    expect(describeTrim(cut, { a: 0, b: 0 }, 78)).toBe('');
+  });
+
+  it('warns what applying would trim, and why, from the real apply', () => {
+    const doc = shortB();
+    const cut = cutAt(doc);
+    const r = applyTransition(doc, cut.key, 'crossDissolve', { feel: 50, duration: 78 });
+    if (!r.ok) throw new Error('apply failed');
+    expect(r.trimmed).toEqual({ a: 0, b: 21 });
+    expect(plain(describeTrimWarning(cut, r.trimmed, r.transition.duration))).toBe(
+      'Will trim right clip by 0.70 s (21 f): Clip B has only 0.60 s (18 f) of footage before its start, ' +
+        'and a centred 2.60 s (78 f) transition needs 1.30 s (39 f) on each side.',
+    );
+    expect(describeTrimWarning(cut, { a: 0, b: 0 }, 24)).toBe('');
   });
 });

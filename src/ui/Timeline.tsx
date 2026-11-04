@@ -42,7 +42,10 @@ export interface TimelineApi {
 /** How far (px) from a cut, or from its transition's edges, a preset drop still lands on it. */
 const CUT_DROP_PX = 28;
 
-/** Width of the placeholder at a cut picked with +: a marker only, not the transition's length. */
+/**
+ * Placeholder width at a cut picked with + when no duration is known. Otherwise it spans the full
+ * duration applying would give, centred on the cut, so its edges meet the ticks on the handle strips.
+ */
 const PENDING_SLOT_FRAMES: Frames = 6;
 
 interface Props {
@@ -57,6 +60,8 @@ interface Props {
   targetCutKey: string | null;
   /** A cut picked with + that has no transition yet; it gets a placeholder slot. */
   pendingCutKey: string | null;
+  /** The duration applying would give at `pendingCutKey` (the hovered preset, else the first), for its handle strips. */
+  pendingDuration: Frames | null;
   /** The Transitions picker is in use: show the target cut's handles. */
   pickerActive: boolean;
   pickerId: string;
@@ -86,6 +91,8 @@ interface Props {
   /** Keyboard trim: commit one step. */
   onTrimStep: (clipId: string, edge: TrimEdge, requested: Frames) => TrimResult;
   announce: (text: string) => void;
+  /** Announce and also show a toast with Undo, for side effects such as clips trimmed to make room. */
+  notify: (text: string) => void;
 }
 
 /** Space after the last clip, so there's room to drop at the end. */
@@ -469,15 +476,28 @@ export function Timeline(props: Props) {
                 const t = transitionAt(doc, cut.key);
                 const limits = getLimits(doc, cut);
                 const dropHere = props.dropCutKey === cut.key;
+                // A selected transition keeps its strips up, so a Duration change in the popover shows its handle use.
+                const selectedHere = !!t && props.selection?.kind === 'transition' && props.selection.id === t.id;
+                // So does the placeholder of a picked cut waiting for a preset.
+                const pendingHere = !t && props.pendingCutKey === cut.key;
                 const showStrips =
                   dropHere ||
+                  selectedHere ||
+                  pendingHere ||
                   hoverCut === cut.key ||
                   focusCut === cut.key ||
                   engagedCut === cut.key ||
                   (pickerActive && targetCutKey === cut.key);
                 const aTail = limits.available.aTail;
                 const bHead = limits.available.bHead;
-                const half = t ? t.duration / 2 : 0;
+                const duration = t ? t.duration : pendingHere ? (props.pendingDuration ?? 0) : 0;
+                const half = duration / 2;
+                // How much of each handle the transition here plays (half its length on each side of the cut).
+                const aUsed = Math.min(half, aTail);
+                const bUsed = Math.min(half, bHead);
+                // Before a transition is applied, a handle can be shorter than it needs: say so (applying trims the clip).
+                const usage = (handle: Frames, used: Frames) =>
+                  duration === 0 ? `${handle} f` : half > handle ? `${handle} f, needs ${half}` : `${used} of ${handle} f used`;
                 return (
                   <div
                     key={cut.key}
@@ -489,16 +509,18 @@ export function Timeline(props: Props) {
                           className={`handle-strip strip-a${aTail === 0 ? ' empty' : ''}`}
                           style={{ left: x(cut.frame), width: Math.max(2, x(Math.min(aTail, len - cut.frame))) }}
                         >
-                          <span>
-                            {cut.from.label} tail · {aTail} f
+                          {aUsed > 0 && <span className="handle-used" style={{ width: x(Math.min(aUsed, len - cut.frame)) }} />}
+                          <span className="handle-label">
+                            {cut.from.label} tail · {usage(aTail, aUsed)}
                           </span>
                         </div>
                         <div
                           className={`handle-strip strip-b${bHead === 0 ? ' empty' : ''}`}
                           style={{ left: x(cut.frame - Math.min(bHead, cut.frame)), width: Math.max(2, x(Math.min(bHead, cut.frame))) }}
                         >
-                          <span>
-                            {cut.to.label} head · {bHead} f
+                          {bUsed > 0 && <span className="handle-used" style={{ width: x(Math.min(bUsed, cut.frame)) }} />}
+                          <span className="handle-label">
+                            {cut.to.label} head · {usage(bHead, bUsed)}
                           </span>
                         </div>
                       </>
@@ -545,13 +567,14 @@ export function Timeline(props: Props) {
                         onEngaged={(on) => setEngagedCut((k) => (on ? cut.key : k === cut.key ? null : k))}
                         onStepDuration={(requested) => props.onStepDuration(cut.key, requested)}
                         announce={props.announce}
+                        notify={props.notify}
                       />
                     ) : (
                       <>
                         {props.pendingCutKey === cut.key && (
                           <div
                             className="transition-slot"
-                            style={{ left: x(cut.frame), width: x(PENDING_SLOT_FRAMES) }}
+                            style={{ left: x(cut.frame), width: x(props.pendingDuration ?? PENDING_SLOT_FRAMES) }}
                             aria-hidden="true"
                           />
                         )}

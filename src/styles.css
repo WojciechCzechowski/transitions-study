@@ -448,7 +448,9 @@ h2[tabindex='-1']:focus-visible {
   font-size: 12px;
   font-weight: 500;
   line-height: 18px;
-  white-space: nowrap;
+  /* Short tips stay on one line; long ones (the trim warning) wrap. */
+  width: max-content;
+  max-width: 300px;
   pointer-events: none;
   animation: ui-tooltip-in 90ms ease-out;
 }
@@ -921,16 +923,21 @@ h2[tabindex='-1']:focus-visible {
   border-color: var(--border-strong);
 }
 
-.preset-tune {
-  left: 6px;
+.preset-tune,
+.preset-trim {
   opacity: 0;
   transition: opacity 100ms;
 }
 
-.preset:hover .preset-tune,
-.preset:focus-within .preset-tune,
-.preset.applied .preset-tune,
-.preset.tuning .preset-tune {
+.preset-tune {
+  left: 6px;
+}
+
+/* The trim warning shows and hides with the settings button beside it. */
+.preset:hover :is(.preset-tune, .preset-trim),
+.preset:focus-within :is(.preset-tune, .preset-trim),
+.preset.applied :is(.preset-tune, .preset-trim),
+.preset.tuning :is(.preset-tune, .preset-trim) {
   opacity: 1;
 }
 
@@ -952,6 +959,20 @@ h2[tabindex='-1']:focus-visible {
 .preset-hint {
   font-size: 11px;
   color: var(--muted);
+}
+
+/* What applying this preset at the target cut would trim: a warning mark beside the settings button; the tooltip says what. */
+.preset-trim {
+  position: absolute;
+  bottom: 6px;
+  left: 36px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
 }
 
 .gallery-keys {
@@ -1603,6 +1624,7 @@ button.source-pill:hover {
 /* --- timeline pane -------------------------------------------------------- */
 
 .timeline-pane {
+  position: relative;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2184,9 +2206,39 @@ button.source-pill:hover {
   white-space: nowrap;
 }
 
-.handle-strip span {
+.handle-label {
+  position: relative;
   padding: 0 4px;
   color: var(--text);
+  /* Readable over the used part and its tick without hiding them. */
+  text-shadow:
+    0 0 2px var(--surface),
+    0 0 2px var(--surface),
+    0 0 3px var(--surface);
+}
+
+/*
+ * The part of a handle the transition plays: solid, from the cut outward to a tick where it
+ * stops. The hatched rest is spare footage; a longer transition can use it without trimming.
+ */
+.handle-used {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.strip-a .handle-used {
+  left: 0;
+  background: rgb(var(--strip-a));
+  border-right: 2px solid rgb(0 0 0 / 0.55);
+  border-radius: 3px 0 0 3px;
+}
+
+.strip-b .handle-used {
+  right: 0;
+  background: rgb(var(--strip-b));
+  border-left: 2px solid rgb(0 0 0 / 0.55);
+  border-radius: 0 3px 3px 0;
 }
 
 .strip-a {
@@ -2207,16 +2259,16 @@ button.source-pill:hover {
   overflow: visible;
 }
 
-.handle-strip.empty span {
+.handle-strip.empty .handle-label {
   position: absolute;
   color: var(--warn);
 }
 
-.strip-a.empty span {
+.strip-a.empty .handle-label {
   left: 4px;
 }
 
-.strip-b.empty span {
+.strip-b.empty .handle-label {
   right: 4px;
 }
 
@@ -2329,6 +2381,7 @@ button.source-pill:hover {
   background: rgb(255 255 255 / 0.45);
   pointer-events: none;
   animation: slot-in 140ms ease-out;
+  /* No width transition: the box resizes in step with the handle strips and their ticks. */
 }
 
 @keyframes slot-in {
@@ -2580,5 +2633,80 @@ button.source-pill:hover {
     transition: none !important;
     animation: none !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* --- toast: a visible note about an edit's side effect, with Undo ---------- */
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(600px, calc(100% - 32px));
+  padding: 8px 8px 8px 16px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+  line-height: 18px;
+  animation: toast-in 160ms ease-out;
+}
+
+.toast-text {
+  margin-right: 10px;
+}
+
+.toast-undo,
+.toast-close {
+  flex: none;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.toast-undo {
+  padding: 4px 12px;
+  font-weight: 600;
+}
+
+.toast-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  opacity: 0.7;
+}
+
+.toast-undo:hover,
+.toast-close:hover {
+  background: rgb(255 255 255 / 0.16);
+  opacity: 1;
+}
+
+.toast-undo:focus-visible,
+.toast-close:focus-visible {
+  outline: 2px solid var(--on-primary);
+  outline-offset: -2px;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
   }
 }

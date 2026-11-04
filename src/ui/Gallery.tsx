@@ -50,10 +50,22 @@ interface Props {
   onActiveChange: (active: boolean) => void;
   /** The preset whose settings popover is open. */
   tuningId: string | null;
+  /** Per preset: what applying it here would trim off the clips, e.g. "Will trim right clip by 0.70 s (21 f)". */
+  trimNotes: Readonly<Record<string, string>>;
   /** The settings button on a card: opens (or closes) that preset's popover. */
   onTune: (id: string) => void;
   /** The trash button on the applied card. */
   onRemove: () => void;
+}
+
+/** A bare exclamation mark, drawn like the other line icons. */
+function ExclamationMark() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" aria-hidden="true">
+      <path d="M12 5v9" />
+      <path d="M12 19h.01" />
+    </svg>
+  );
 }
 
 /** Keeps a press or key on a card's own buttons from also dragging, applying or moving in the list. */
@@ -277,6 +289,11 @@ export function Gallery(props: Props) {
               >
                 <SlidersHorizontal size={14} aria-hidden="true" />
               </button>
+              {props.trimNotes[p.id] && (
+                <span className="preset-trim" role="img" aria-label={props.trimNotes[p.id]} data-tip={props.trimNotes[p.id]}>
+                  <ExclamationMark />
+                </span>
+              )}
               {appliedId === p.id && (
                 <button
                   type="button"

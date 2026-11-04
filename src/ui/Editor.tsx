@@ -22,7 +22,7 @@ import {
   type History,
 } from '../model/history';
 import { markedRange, markIn, markOut, NO_MARKS, type Marks } from '../model/marks';
-import { describeLimit, describeNoHandles, describeRoom, describeTrim } from '../model/messages';
+import { describeLimit, describeNoHandles, describeRoom, describeTrim, describeTrimWarning } from '../model/messages';
 import {
   applyTransition,
   deleteClip,
@@ -43,14 +43,12 @@ import {
   type ApplyLook,
 } from '../model/ops';
 import {
-  clampDuration,
   clipIndexById,
   cutByKey,
   cuts,
   docEquals,
   getLimits,
   NO_ROOM,
-  roomFor,
   timelineLength,
   transitionAt,
   transitionById,
@@ -69,6 +67,7 @@ import { LibraryPanel, type ShownSource } from './LibraryPanel';
 import { SourceControls } from './SourceControls';
 import { ThumbsContext } from './Filmstrip';
 import { Timeline, type Selection, type TimelineApi } from './Timeline';
+import { Toast } from './Toast';
 import { TransitionPopover } from './TransitionPopover';
 import { TransitionsPanel } from './TransitionsPanel';
 
@@ -153,13 +152,15 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const [tab, setTabState] = useState<Tab>(readTab);
   const [pickerActive, setPickerActive] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  /** The preset card under the pointer (or keyboard focus), previewed or not: its trim is shaded on the timeline. */
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const [previewOnHover, setPreviewOnHoverState] = useState(readPreviewOnHover);
   const [preview, setPreview] = useState({ active: false, playing: false });
   /** The preset card whose settings popover is open; it previews in the viewer while open. */
   const [tuningId, setTuningId] = useState<string | null>(null);
   /**
-   * Feel and Fine-tune set up on a preset before it's applied, per preset, for the session.
-   * Not undoable: they describe the next apply, not the edit.
+   * Feel, Fine-tune and duration set up on a preset before it's applied, per preset, kept until
+   * that preset is applied (then the transition owns them). Not undoable: they describe the next apply, not the edit.
    */
   const [drafts, setDrafts] = useState<Readonly<Record<string, ApplyLook>>>({});
   /** The timeline as a popover Duration drag began: the drag resizes from it, as the edge handles do. */
@@ -168,6 +169,12 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const [viewportWidth, setViewportWidth] = useState(0);
   const [libDrag, setLibDrag] = useState<{ sourceId: string; x: number; y: number; index: number | null } | null>(null);
   const [presetDrag, setPresetDrag] = useState<PresetDrag | null>(null);
+  /**
+   * A visible note about an edit's side effect (clips trimmed to make room), with Undo.
+   * `anchor` is the timeline right after that edit; any later change closes the toast,
+   * so its Undo always undoes the edit it describes.
+   */
+  const [toast, setToast] = useState<{ text: string; n: number; anchor: Doc | null } | null>(null);
   const [, setFocusTick] = useState(0);
   /** In/out marks per Library clip. Not part of undo: they describe the Library, not the edit. */
   const [marks, setMarks] = useState<Readonly<Record<string, Marks>>>({});
@@ -185,6 +192,8 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const presetDragRef = useRef(presetDrag);
   presetDragRef.current = presetDrag;
   const sliderGesture = useRef(false);
+  /** What the popover Duration drag in progress has trimmed so far, to report when it ends. */
+  const sliderTrim = useRef<{ cutKey: string; trimmed: Room; doc: Doc } | null>(null);
   const pickerId = useId();
   const tabsId = useId();
 
@@ -254,6 +263,29 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
 
   // --- history -----------------------------------------------------------------
 
+  /** The trim made by a duration change at `cutKey` (if any), with why, shown as a toast. `after` is the edited timeline. */
+  const notifyTrim = (cutKey: string, trimmed: Room, after: Doc) => {
+    if (trimmed === NO_ROOM) return;
+    const cut = cutByKey(after, cutKey);
+    const t = transitionAt(after, cutKey);
+    if (cut && t) notify(describeTrim(cut, trimmed, t.duration));
+  };
+
+  /** Announce `text` and also show it in a toast with Undo: for side effects worth seeing. */
+  const notify = useCallback(
+    (text: string) => {
+      announce(text);
+      setToast((t) => ({ text, n: (t?.n ?? 0) + 1, anchor: null }));
+    },
+    [announce],
+  );
+  // The edit and its notify land in one render: pin the toast to that timeline, close it on the next change.
+  useEffect(() => {
+    if (!toast) return;
+    if (toast.anchor === null) setToast({ ...toast, anchor: doc });
+    else if (toast.anchor !== doc) setToast(null);
+  }, [toast, doc]);
+
   const commitDoc = useCallback((next: Doc, label: string) => {
     setHistory((h) => commit(h, next, label, docEquals));
   }, []);
@@ -287,6 +319,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   useEffect(() => {
     controller.endPreview();
     setPreviewId(null);
+    setHoverId(null);
     setTuningId(null);
   }, [controller, targetKey]);
 
@@ -379,14 +412,20 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     return { cutKey: cut.key, ...look, ...(r.trimmed !== NO_ROOM && { doc: r.doc }) };
   };
 
-  /** What applying a preset at `cut` would trim to make room (nothing when replacing). */
-  const roomAt = (cut: Cut): Room => {
-    if (transitionAt(doc, cut.key)) return NO_ROOM;
-    const l = getLimits(doc, cut);
-    return l.canTransition ? roomFor(cut, clampDuration(TRANSITION_DEFAULTS.duration, l).duration) : NO_ROOM;
+  /** How applying `presetId` (with its draft, if any) treats a cut; the click, Enter and drop paths all use it. */
+  const applyOptions = (presetId: string) => {
+    const draft = drafts[presetId];
+    return { feel: TRANSITION_DEFAULTS.feel, duration: TRANSITION_DEFAULTS.duration, ...(draft && { look: draft }) };
+  };
+
+  /** What applying `presetId` at `cut` would trim off the clips to make room. */
+  const trimAt = (cut: Cut, presetId: string): Room => {
+    const r = applyTransition(doc, cut.key, presetId, applyOptions(presetId));
+    return r.ok ? r.trimmed : NO_ROOM;
   };
 
   const onPreview = (id: string) => {
+    setHoverId(id);
     // The settings popover owns the viewer while it's open.
     if (!previewOnHover || tuningId) return;
     const c = targetCut ? candidateAt(targetCut, id) : null;
@@ -410,6 +449,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   };
 
   const onLeavePreview = () => {
+    setHoverId(null);
     // A preset drag owns the preview until it drops; the settings popover until it closes.
     if (presetDragRef.current || tuningId) return;
     controller.endPreview();
@@ -428,28 +468,32 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const applyAt = (target: Cut, id: string) => {
     const preset = getPreset(id);
     const draft = drafts[id];
-    const r = applyTransition(doc, target.key, id, {
-      feel: TRANSITION_DEFAULTS.feel,
-      duration: TRANSITION_DEFAULTS.duration,
-      ...(draft && { look: draft }),
-    });
+    const r = applyTransition(doc, target.key, id, applyOptions(id));
     if (!r.ok) {
       if (r.limits) announce(describeNoHandles(target, r.limits));
       return;
     }
     if (r.doc !== doc) commitDoc(r.doc, r.replaced ? `Change to ${preset.name}` : `Apply ${preset.name}`);
+    // A draft is the settings for the next apply only: once applied, the transition owns them,
+    // so a later swap back to this preset keeps the cut's duration and Feel like any other swap.
+    if (draft) {
+      setDrafts(({ [id]: _used, ...rest }) => rest);
+    }
     controller.endPreview();
     setPreviewId(null);
+    setHoverId(null);
     setTuningId(null);
     setTargetCutKey(target.key);
     setSelection({ kind: 'transition', id: r.transition.id });
     setTab('transitions');
     const cut = cutByKey(r.doc, target.key)!;
     const capped = r.clamped === 'max' ? ` ${describeLimit(cut, getLimits(r.doc, cut))}.` : '';
-    const trimmed = r.trimmed !== NO_ROOM ? ` ${describeTrim(cut, r.trimmed)}` : '';
+    const trimmed = r.trimmed !== NO_ROOM ? ` ${describeTrim(cut, r.trimmed, r.transition.duration)}` : '';
+    // A trim changes the clips, not just the transition: show it as well as announcing it.
+    const say = trimmed ? notify : announce;
     if (r.doc === doc) announce(`${preset.name} selected`);
-    else if (r.replaced) announce(`Changed to ${preset.name}: ${formatDuration(r.transition.duration)}, ${draft ? 'with its settings' : 'Feel kept'}.${capped}`);
-    else announce(`${preset.name} applied: ${formatDuration(r.transition.duration)}, centred on the cut.${trimmed}${capped}`);
+    else if (r.replaced) say(`Changed to ${preset.name}: ${formatDuration(r.transition.duration)}, ${draft ? 'with its settings' : 'Feel kept'}.${trimmed}${capped}`);
+    else say(`${preset.name} applied: ${formatDuration(r.transition.duration)}, centred on the cut.${trimmed}${capped}`);
   };
 
   const removeTransitionAt = (cutKey: string) => {
@@ -473,6 +517,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const onSliderPointerDown = (label: string) => {
     if (sliderGesture.current || !tuningLive) return;
     sliderGesture.current = true;
+    sliderTrim.current = null;
     gesture.begin();
     if (label === 'Change duration') setDurationBase(doc);
     const end = () => {
@@ -481,6 +526,9 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       sliderGesture.current = false;
       setDurationBase(null);
       gesture.end(label);
+      const trim = sliderTrim.current;
+      sliderTrim.current = null;
+      if (trim) notifyTrim(trim.cutKey, trim.trimmed, trim.doc);
     };
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
@@ -526,9 +574,16 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     }
     const t = targetTransition;
     if (!t) return;
-    const r = setDuration(durationBase ?? doc, transitionCutKey(t), value);
-    if (sliderGesture.current) gesture.update(r.doc);
-    else if (r.doc !== doc) commitDoc(r.doc, 'Change duration');
+    const cutKey = transitionCutKey(t);
+    const r = setDuration(durationBase ?? doc, cutKey, value);
+    if (sliderGesture.current) {
+      gesture.update(r.doc);
+      // Measured from the timeline as the drag began, so this is the drag's whole trim.
+      sliderTrim.current = r.trimmed !== NO_ROOM ? { cutKey, trimmed: r.trimmed, doc: r.doc } : null;
+    } else {
+      if (r.doc !== doc) commitDoc(r.doc, 'Change duration');
+      notifyTrim(cutKey, r.trimmed, r.doc);
+    }
   };
 
   // The Duration slider's range; during a drag, from the timeline as the drag began.
@@ -608,8 +663,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const onStepDuration = (cutKey: string, requested: Frames) => {
     const r = setDuration(doc, cutKey, requested);
     if (r.doc !== doc) commitDoc(r.doc, 'Change duration');
-    const cut = r.trimmed !== NO_ROOM ? cutByKey(r.doc, cutKey) : null;
-    if (cut) announce(describeTrim(cut, r.trimmed));
+    notifyTrim(cutKey, r.trimmed, r.doc);
     return r;
   };
 
@@ -910,10 +964,10 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
 
   const mod = modKey;
   // A cut picked with + and still waiting for a preset: mark where the transition will land,
-  // if one fits there (the previewed preset, else the first one).
+  // if one fits there (the previewed preset, else the one whose settings are open, else the first one).
   const pendingCandidate =
     tab === 'transitions' && targetCut && !targetTransition
-      ? candidateAt(targetCut, previewId ?? PRESETS[0]!.id)
+      ? candidateAt(targetCut, previewId ?? tuningId ?? PRESETS[0]!.id)
       : null;
   const pendingCutKey = pendingCandidate?.cutKey ?? null;
 
@@ -934,7 +988,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const dragCut = presetDrag ? cutByKey(doc, presetDrag.cutKey) : null;
   const dragLimits = dragCut ? getLimits(doc, dragCut) : null;
   const dragValid = !!dragLimits?.canTransition;
-  const dragRoom = dragCut && dragValid ? roomAt(dragCut) : NO_ROOM;
+  const dragRoom = presetDrag && dragCut && dragValid ? trimAt(dragCut, presetDrag.presetId) : NO_ROOM;
   const dragNote = !dragCut
     ? 'Drop on a cut'
     : !dragValid
@@ -942,12 +996,29 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       : `${transitionAt(doc, dragCut.key) ? 'Replace at' : 'Apply to'} Cut ${dragCut.index + 1}` +
         (dragRoom !== NO_ROOM ? ` · trims ${describeRoom(dragCut, dragRoom)}` : '');
   // Frames that applying a preset would trim off the clips, shaded on the timeline.
+  // Shade what a preset would trim only while that preset is in focus: hovered, or open in its settings.
+  const trimFocusId = hoverId ?? (tuningId && !tuningLive ? tuningId : null);
+  const focusRoom = !presetDrag && trimFocusId && targetCut && !targetTransition ? trimAt(targetCut, trimFocusId) : NO_ROOM;
   const trimPreview =
     dragCut && dragRoom !== NO_ROOM
       ? { cutKey: dragCut.key, room: dragRoom }
-      : !presetDrag && pendingCandidate?.doc && targetCut
-        ? { cutKey: targetCut.key, room: roomAt(targetCut) }
+      : targetCut && focusRoom !== NO_ROOM
+        ? { cutKey: targetCut.key, room: focusRoom }
         : null;
+
+  // Warn on each preset card, before it's applied, when it would trim the clips at the target cut
+  // (its drafted duration included). Recomputed only when the timeline, the cut or a draft changes.
+  const trimNotes = useMemo(() => {
+    const cut = targetKey ? cutByKey(doc, targetKey) : null;
+    const notes: Record<string, string> = {};
+    if (!cut) return notes;
+    for (const p of PRESETS) {
+      const draft = drafts[p.id];
+      const r = applyTransition(doc, cut.key, p.id, { feel: TRANSITION_DEFAULTS.feel, duration: TRANSITION_DEFAULTS.duration, ...(draft && { look: draft }) });
+      if (r.ok && r.trimmed !== NO_ROOM) notes[p.id] = describeTrimWarning(cut, r.trimmed, r.transition.duration);
+    }
+    return notes;
+  }, [doc, drafts, targetKey]);
 
   const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -1027,6 +1098,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
                 onEscape={leavePicker}
                 onActiveChange={setPickerActive}
                 tuningId={tuningId}
+                trimNotes={disabledReason ? {} : trimNotes}
                 onTune={toggleTuning}
                 onRemove={() => targetCut && removeTransitionAt(targetCut.key)}
               />
@@ -1157,6 +1229,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
         selection={selection}
         targetCutKey={targetCut?.key ?? null}
         pendingCutKey={pendingCutKey}
+        pendingDuration={pendingCandidate?.duration ?? null}
         pickerActive={tab === 'transitions' && !selectedTransition && (pickerActive || preview.active)}
         pickerId={pickerId}
         dropIndex={libDrag?.index ?? null}
@@ -1179,7 +1252,19 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
         onNudgeClip={onNudgeClip}
         onTrimStep={onTrimStep}
         announce={announce}
+        notify={notify}
       />
+      {toast && (
+        <Toast
+          key={toast.n}
+          text={toast.text}
+          onUndo={() => {
+            setToast(null);
+            doUndo();
+          }}
+          onClose={() => setToast(null)}
+        />
+      )}
     </>
   );
 

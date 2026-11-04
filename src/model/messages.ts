@@ -44,8 +44,40 @@ export function describeRoom(cut: Cut, room: Room): string {
   return parts.join(' and ');
 }
 
-/** Sentence for an announcement after an edit made room, or '' when nothing was trimmed. */
-export function describeTrim(cut: Cut, room: Room): string {
-  const what = describeRoom(cut, room);
-  return what ? `Trimmed ${what} to make room.` : '';
+/** "0.40 s (12 f)", held together (no-break spaces) so a wrapping tooltip or toast never splits it. */
+const span = (n: Frames) => `${formatSeconds(n)} (${n} f)`.replace(/ /g, '\u00a0');
+
+/** "left clip by 0.40 s (12 f) and right clip by 0.20 s (6 f)": what making room trims, by side, or '' when nothing. */
+function describeSides(room: Room): string {
+  const parts: string[] = [];
+  if (room.a > 0) parts.push(`left clip by ${span(room.a)}`);
+  if (room.b > 0) parts.push(`right clip by ${span(room.b)}`);
+  return parts.join(' and ');
+}
+
+/**
+ * Why a centred transition of `duration` needs the trim: it overlaps the cut by half its length on
+ * each side, so each clip must have that much unused footage past the cut (its handle). The trim is
+ * what the handle lacks, so the handle before the edit is `half − trimmed`.
+ * "river has only 0.60 s (18 f) of footage before its start, and a centred 2.60 s (78 f) transition
+ * needs 1.30 s (39 f) on each side"
+ */
+function describeWhy(cut: Cut, room: Room, duration: Frames): string {
+  const half = duration / 2;
+  const short: string[] = [];
+  if (room.a > 0) short.push(`${cut.from.label} has only ${span(half - room.a)} of footage after its end`);
+  if (room.b > 0) short.push(`${cut.to.label} has only ${span(half - room.b)} of footage before its start`);
+  return `${short.join(' and ')}, and a centred ${span(duration)} transition needs ${span(half)} on each side`;
+}
+
+/** Sentence for the toast and announcement after an edit to `duration` made room, or '' when nothing was trimmed. */
+export function describeTrim(cut: Cut, room: Room, duration: Frames): string {
+  const what = describeSides(room);
+  return what ? `Trimmed ${what} to make room: ${describeWhy(cut, room, duration)}.` : '';
+}
+
+/** The warning on a preset card before it's applied, e.g. "Will trim right clip by 0.70 s (21 f): river has only …", or '' when nothing. */
+export function describeTrimWarning(cut: Cut, room: Room, duration: Frames): string {
+  const what = describeSides(room);
+  return what ? `Will trim ${what}: ${describeWhy(cut, room, duration)}.` : '';
 }
