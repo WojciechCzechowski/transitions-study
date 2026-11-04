@@ -203,14 +203,13 @@ export function moveClip(doc: Doc, id: string, toIndex: number): Doc {
   return normalize({ ...doc, clips });
 }
 
-export type DeleteResult = { ok: true; doc: Doc } | { ok: false; reason: 'last-clip' };
-
-/** Ripple delete: later clips close the gap; transitions on both of its cuts go too. */
-export function deleteClip(doc: Doc, id: string): DeleteResult {
-  const i = clipIndexById(doc, id);
-  if (i < 0) return { ok: true, doc };
-  if (doc.clips.length <= 1) return { ok: false, reason: 'last-clip' };
-  return { ok: true, doc: normalize({ ...doc, clips: doc.clips.filter((c) => c.id !== id) }) };
+/**
+ * Ripple delete: later clips close the gap; transitions on both of its cuts go too.
+ * Deleting the last clip leaves an empty timeline. Same reference for an unknown id.
+ */
+export function deleteClip(doc: Doc, id: string): Doc {
+  if (clipIndexById(doc, id) < 0) return doc;
+  return normalize({ ...doc, clips: doc.clips.filter((c) => c.id !== id) });
 }
 
 export type SplitResult =

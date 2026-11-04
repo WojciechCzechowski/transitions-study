@@ -1438,6 +1438,17 @@ h2[tabindex='-1']:focus-visible {
   height: 112px;
 }
 
+.track-empty {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
 .cut-layer {
   display: contents;
 }

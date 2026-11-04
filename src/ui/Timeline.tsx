@@ -176,7 +176,7 @@ export function Timeline(props: Props) {
     if (next === null) return;
     e.preventDefault();
     props.onScrubStart();
-    props.onScrub(clamp(next, 0, len - 1));
+    props.onScrub(clamp(next, 0, Math.max(0, len - 1)));
   };
 
   // Keep the playhead in view while playing or stepping.
@@ -323,7 +323,7 @@ export function Timeline(props: Props) {
             tabIndex={0}
             aria-label="Playhead"
             aria-valuemin={0}
-            aria-valuemax={len - 1}
+            aria-valuemax={Math.max(0, len - 1)}
             aria-valuenow={playhead}
             aria-valuetext={`Frame ${playhead}, ${formatTimecode(playhead)}`}
             onPointerDown={onRulerDown}
@@ -354,6 +354,7 @@ export function Timeline(props: Props) {
                 if (e.target === e.currentTarget) props.onSelect(null);
               }}
             >
+              {doc.clips.length === 0 && <p className="track-empty">Drag a clip here from the Library</p>}
               {doc.clips.map((clip, i) => (
                 <ClipItem
                   key={clip.id}

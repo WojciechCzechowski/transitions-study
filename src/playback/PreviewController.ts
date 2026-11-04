@@ -161,8 +161,9 @@ export class PreviewController {
 
   play() {
     if (!this.doc || !this.ready) return;
-    this.leavePreview(false);
     const last = timelineLength(this.doc) - 1;
+    if (last < 0) return;
+    this.leavePreview(false);
     const start = this.playhead >= last ? 0 : this.playhead;
     this.playhead = start;
     this.playStats = { shown: 0, inexact: 0 };
@@ -388,6 +389,15 @@ export class PreviewController {
       ? { cutKey: m.candidate.cutKey, look: m.candidate }
       : undefined;
     this.updateDemand(doc);
+    if (timelineLength(doc) === 0) {
+      // Empty timeline: nothing to show.
+      if (this.lastKey !== 'empty') {
+        renderer.clear();
+        this.lastKey = 'empty';
+      }
+      this.markDrawn();
+      return;
+    }
     const r = resolveFrame(doc, t, override);
     const counting = m.kind === 'playing' && t !== this.countedFrame;
 

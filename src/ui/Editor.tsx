@@ -527,16 +527,13 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       return;
     }
     const label = labelOf(selection.id);
-    const r = deleteClip(doc, selection.id);
-    if (!r.ok) {
-      announce('The timeline needs at least one clip');
-      return;
-    }
+    const next = deleteClip(doc, selection.id);
+    if (next === doc) return;
     controller.endPreview();
-    commitDoc(r.doc, `Delete ${label}`);
+    commitDoc(next, `Delete ${label}`);
     setSelection(null);
     setTargetCutKey(null);
-    announce(`${label} deleted`);
+    announce(next.clips.length === 0 ? `${label} deleted. The timeline is empty` : `${label} deleted`);
   };
 
   // --- library drag ----------------------------------------------------------
@@ -865,7 +862,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
           onClick={() => controller.togglePlay()}
           aria-label={playing ? 'Pause' : 'Play'}
           aria-keyshortcuts="Space"
-          disabled={!ready}
+          disabled={!ready || len === 0}
         >
           <span aria-hidden="true">{playing ? <Pause size={SMALL_ICON}/> : <Play size={SMALL_ICON}/>}</span>
         </button>

@@ -183,15 +183,22 @@ describe('moveClip and deleteClip', () => {
   it('ripple-deletes a clip with the transitions on its cuts', () => {
     const doc = applied(insertClip(shortB(), SOURCES[0], 2, HANDLES).doc);
     const r = deleteClip(doc, 'c2');
-    expect(r.ok && r.doc.clips.map((c) => c.id)).toEqual(['c1', 'c3']);
-    expect(r.ok && r.doc.transitions).toHaveLength(0);
-    expect(r.ok && timelineLength(r.doc)).toBe(120);
+    expect(r.clips.map((c) => c.id)).toEqual(['c1', 'c3']);
+    expect(r.transitions).toHaveLength(0);
+    expect(timelineLength(r)).toBe(120);
   });
 
-  it('keeps at least one clip', () => {
+  it('can delete every clip, leaving an empty timeline', () => {
     const one = deleteClip(shortB(), 'c2');
-    if (!one.ok) throw new Error();
-    expect(deleteClip(one.doc, 'c1')).toEqual({ ok: false, reason: 'last-clip' });
+    const none = deleteClip(one, 'c1');
+    expect(none.clips).toEqual([]);
+    expect(none.transitions).toEqual([]);
+    expect(timelineLength(none)).toBe(0);
+    expect(cuts(none)).toEqual([]);
+    expect(splitClip(none, 0)).toEqual({ ok: false, reason: 'outside' });
+    // A clip can be dropped back onto the empty timeline.
+    const back = insertClip(none, SOURCES[0], 0, HANDLES).doc;
+    expect(back.clips).toHaveLength(1);
   });
 });
 
@@ -277,7 +284,6 @@ describe('a small edit session', () => {
     if (!r.ok) throw new Error();
     doc = trimClip(r.doc, 'c4', 'end', 70).doc;
     expect(transitionAt(doc, 'c2|c4')?.duration).toBe(24);
-    const d = deleteClip(doc, 'c4');
-    expect(d.ok && d.doc.transitions).toHaveLength(0);
+    expect(deleteClip(doc, 'c4').transitions).toHaveLength(0);
   });
 });
