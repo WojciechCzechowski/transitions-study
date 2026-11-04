@@ -81,10 +81,11 @@ export function probe(file) {
  * Write public/clips/manifest.json. The app reads this to learn each clip's
  * file name and frame count; in/out points live in src/config/study.config.ts.
  */
-export function writeManifest(clips, source) {
+export function writeManifest(clips, source, extra = {}) {
   const manifest = {
     fps: FPS,
     source,
+    ...extra,
     clips: clips.map((c) => {
       const p = probe(join(CLIPS_DIR, c.file));
       if (p.rate !== `${FPS}/1`) {

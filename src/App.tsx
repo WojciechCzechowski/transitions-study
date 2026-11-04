@@ -164,7 +164,21 @@ export function App() {
         </span>
       </nav>
       <span className="spacer" />
-      <span className="topbar-note muted">Unofficial interaction study</span>
+      <span className="topbar-note muted">
+        Unofficial interaction study
+        {manifest?.credit && (
+          <>
+            {' · '}
+            {manifest.credit.url ? (
+              <a href={manifest.credit.url} target="_blank" rel="noreferrer">
+                {manifest.credit.text}
+              </a>
+            ) : (
+              manifest.credit.text
+            )}
+          </>
+        )}
+      </span>
       <ShortcutsDialog />
       <TooltipLayer />
     </>

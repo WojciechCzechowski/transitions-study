@@ -170,6 +170,16 @@ h2[tabindex='-1']:focus-visible {
   white-space: nowrap;
 }
 
+.topbar-note a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.topbar-note a:hover {
+  color: var(--text);
+}
+
 .topbar-help {
   display: inline-flex;
   align-items: center;

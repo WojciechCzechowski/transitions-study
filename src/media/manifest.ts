@@ -11,9 +11,17 @@ export interface ManifestClip {
   readonly height: number;
 }
 
+/** Who made the footage, shown in the top bar (e.g. "Footage: Pexels"). */
+export interface FootageCredit {
+  readonly text: string;
+  /** https only. */
+  readonly url?: string;
+}
+
 export interface Manifest {
   readonly fps: number;
   readonly source: string;
+  readonly credit?: FootageCredit;
   /** Library clips, in manifest order. The starting timeline uses the first two. */
   readonly clips: readonly ManifestClip[];
 }
@@ -74,7 +82,17 @@ function validate(data: unknown): Manifest {
   });
   const ids = new Set(clips.map((c) => c.id));
   if (ids.size !== clips.length) throw bad('clip ids must be unique');
-  return { fps: FPS, source: typeof m.source === 'string' ? m.source : 'unknown', clips };
+  const source = typeof m.source === 'string' ? m.source : 'unknown';
+  const credit = readCredit(m.credit);
+  return credit ? { fps: FPS, source, credit, clips } : { fps: FPS, source, clips };
+}
+
+function readCredit(c: unknown): FootageCredit | undefined {
+  if (typeof c !== 'object' || c === null) return undefined;
+  const o = c as Record<string, unknown>;
+  if (typeof o.text !== 'string' || o.text.trim() === '') return undefined;
+  const url = typeof o.url === 'string' && /^https:\/\//.test(o.url) ? o.url : undefined;
+  return url ? { text: o.text, url } : { text: o.text };
 }
 
 /** Size of a clip file from its response headers, or 0 when unknown. */

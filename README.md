@@ -19,6 +19,22 @@ npm run clips:normalize -- ~/Movies/study --starts 2,0,5 --frames all
 
 Library order follows the order given (a folder is sorted by name), the starting timeline uses the first two, and each clip is labelled with its file name. `--start` sets where every clip begins in its source; `--starts` sets it per clip. `--frames all` keeps each video to its end (length only costs download size), and `--size 1920x1080` changes the output size. The run replaces all previous clips in `public/clips`.
 
+`public/clips/` is ignored by git: clips are made locally and not redistributed through the repo. A fresh clone runs `npm run clips` (or `clips:normalize`) before `npm run dev`. `--credit "Footage: Pexels" --credit-url https://www.pexels.com` adds a footage credit that the app shows in the top bar.
+
+## Footage
+
+The demo uses three videos from [Pexels](https://www.pexels.com), free to use under the [Pexels license](https://www.pexels.com/license/) (attribution optional, given here anyway). They were downloaded on 2026-11-04 and re-encoded with `clips:normalize` (1280×720, 30 fps, no audio). The files are not in this repo.
+
+| Clip | Pexels video |
+| --- | --- |
+| A | [14146272](https://www.pexels.com/video/14146272/) |
+| B | [14863901](https://www.pexels.com/video/14863901/) |
+| C | [15826401](https://www.pexels.com/video/15826401/) |
+
+## Deploying
+
+Build where the clips are, then upload the build: `npm run build` copies `public/clips` into `dist`, for example `npx wrangler pages deploy dist` for Cloudflare Pages. A host that builds from the git repo has no clips, because they are not committed. Cloudflare Pages limits each file to 25 MiB, so keep each clip under that (shorter clips, or a higher CRF in `scripts/lib.mjs`).
+
 ## Where things are
 
 | Area | File |

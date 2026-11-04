@@ -2,3 +2,7 @@ node_modules
 dist
 *.local
 .DS_Store
+
+# Library clips are made locally with `npm run clips` or `npm run clips:normalize`.
+# Footage is not redistributed through git (see README, Footage).
+public/clips/

@@ -8,6 +8,9 @@
 // Clip length does not affect memory (the app decodes frames on demand), only
 // download size. --frames all keeps each source to its end.
 //
+// --credit "Footage: Pexels" [--credit-url https://www.pexels.com] puts a
+// footage credit in the manifest; the app shows it in the top bar.
+//
 // Pass at least two videos. A folder adds every video in it, sorted by name.
 // Library order follows the order given; the starting timeline uses the
 // first two. Each clip is labelled with its source file name.
@@ -22,7 +25,7 @@ import { CLIPS_DIR, ENCODE_ARGS, FPS, FRAMES, ensureClipsDir, runFfmpeg, writeMa
 
 const VIDEO_EXT = new Set(['.mov', '.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mts', '.m2ts']);
 const USAGE =
-  'Usage: npm run clips:normalize -- <video or folder>... [--start s] [--starts s1,s2,…] [--frames n|all] [--size WxH]';
+  'Usage: npm run clips:normalize -- <video or folder>... [--start s] [--starts s1,s2,…] [--frames n|all] [--size WxH] [--credit text] [--credit-url https://…]';
 
 const fail = (msg) => {
   console.error(msg);
@@ -33,7 +36,7 @@ const isNonNegative = (n) => !Number.isNaN(n) && n >= 0;
 
 function parseArgs(argv) {
   const inputs = [];
-  const opts = { start: 0, starts: [], frames: FRAMES, width: 1280, height: 720 };
+  const opts = { start: 0, starts: [], frames: FRAMES, width: 1280, height: 720, credit: undefined, creditUrl: undefined };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--start') opts.start = Number(argv[++i]);
@@ -46,6 +49,10 @@ function parseArgs(argv) {
       if (!m || Number(m[1]) % 2 || Number(m[2]) % 2) fail('--size must look like 1280x720, with even numbers');
       opts.width = Number(m[1]);
       opts.height = Number(m[2]);
+    } else if (a === '--credit') opts.credit = String(argv[++i] ?? '').trim() || undefined;
+    else if (a === '--credit-url') {
+      opts.creditUrl = String(argv[++i] ?? '');
+      if (!/^https:\/\//.test(opts.creditUrl)) fail('--credit-url must start with https://');
     } else if (a.startsWith('--')) fail(`Unknown option ${a}\n${USAGE}`);
     else inputs.push(a);
   }
@@ -129,7 +136,9 @@ for (const f of readdirSync(CLIPS_DIR)) {
   }
 }
 
-const manifest = writeManifest(clips, 'normalized');
+if (opts.creditUrl && !opts.credit) fail('--credit-url needs --credit');
+const credit = opts.credit ? { text: opts.credit, ...(opts.creditUrl ? { url: opts.creditUrl } : {}) } : undefined;
+const manifest = writeManifest(clips, 'normalized', credit ? { credit } : {});
 for (const c of manifest.clips) {
   if (Number.isFinite(opts.frames) && c.frames < opts.frames) {
     console.warn(`Warning: ${c.file} (${c.label}) has only ${c.frames} frames (asked for ${opts.frames}). The source is too short after its start point.`);
