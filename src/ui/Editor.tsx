@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { Minus, MoveHorizontal, Plus, Redo2, SquareSplitHorizontal, Undo2 } from 'lucide-react';
 import { LIBRARY_INSERT } from '../config/study.config';
 import { getPreset, PRESETS, TRANSITION_DEFAULTS } from '../config/transitions.config';
 import type { FrameStore } from '../media/FrameStore';
@@ -103,6 +104,10 @@ function readTab(): Tab {
 
 const NO_CUTS = 'Add another clip from the Library to make a cut, then add a transition there.';
 const NO_TARGET = 'Click + between two clips to choose a cut, or drag a preset onto a cut.';
+
+/** Lucide icon size in the timeline bar. */
+const ICON = 16;
+const SMALL_ICON = 14;
 
 const SPLIT_REASONS:Record<Exclude<SplitResult, { ok: true }>['reason'], string> = {
   'on-cut': 'The playhead is on a cut; move it inside a clip to split',
@@ -819,7 +824,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
             title={canUndo(history) ? `Undo ${undoLabel(history)} (${mod}Z)` : 'Nothing to undo'}
             aria-keyshortcuts={isMac ? 'Meta+Z' : 'Control+Z'}
           >
-            <span aria-hidden="true">↶</span>
+            <Undo2 size={ICON} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -830,7 +835,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
             title={canRedo(history) ? `Redo ${redoLabel(history)} (⇧${mod}Z)` : 'Nothing to redo'}
             aria-keyshortcuts={isMac ? 'Shift+Meta+Z' : 'Shift+Control+Z'}
           >
-            <span aria-hidden="true">↷</span>
+            <Redo2 size={ICON} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -841,7 +846,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
             title={splitReason ?? 'Split the clip at the playhead (S)'}
             aria-keyshortcuts="S"
           >
-            <BladeGlyph />
+            <SquareSplitHorizontal size={ICON} aria-hidden="true" />
           </button>
         </div>
         <button
@@ -859,8 +864,8 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
           <output ref={readoutRef} className="frame-readout" />
           <span className="bar-divider" aria-hidden="true" />
           <div className="zoom" role="group" aria-label="Timeline zoom">
-            <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf / 1.25))} aria-label="Zoom out">
-              <span aria-hidden="true">−</span>
+            <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf / 1.25))} aria-label="Zoom out" title="Zoom out">
+              <Minus size={SMALL_ICON} aria-hidden="true" />
             </button>
             <input
               type="range"
@@ -872,11 +877,18 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
               aria-valuetext={`${ppf.toFixed(2)} pixels per frame${zoom === null ? ', fit to width' : ''}`}
               onChange={(e) => setZoom(sliderToZoom(Number(e.currentTarget.value)))}
             />
-            <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf * 1.25))} aria-label="Zoom in">
-              <span aria-hidden="true">+</span>
+            <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf * 1.25))} aria-label="Zoom in" title="Zoom in">
+              <Plus size={SMALL_ICON} aria-hidden="true" />
             </button>
-            <button type="button" className="btn btn-small" onClick={() => setZoom(null)} aria-pressed={zoom === null}>
-              Fit
+            <button
+              type="button"
+              className="btn-icon zoom-fit"
+              onClick={() => setZoom(null)}
+              aria-pressed={zoom === null}
+              aria-label="Fit to width"
+              title="Fit the timeline to the width"
+            >
+              <MoveHorizontal size={ICON} aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -983,12 +995,3 @@ function TransitionsGlyph() {
   );
 }
 
-/** A blade cutting a strip: the split tool glyph. */
-function BladeGlyph() {
-  return (
-    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false">
-      <rect x="2" y="7" width="16" height="6" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M10 2.5v15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}

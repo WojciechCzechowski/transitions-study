@@ -15,6 +15,7 @@
     "clips:normalize": "node scripts/normalize-clips.mjs"
   },
   "dependencies": {
+    "lucide-react": "1.60.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

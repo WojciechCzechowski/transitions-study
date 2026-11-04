@@ -1,5 +1,6 @@
-import { useId, useLayoutEffect, useRef, type Ref } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties, type Ref } from 'react';
 import { createPortal } from 'react-dom';
+import { Repeat, RepeatOff, SlidersHorizontal, Trash } from 'lucide-react';
 import { EASING_CURVES, getPreset } from '../config/transitions.config';
 import type { Bezier } from '../model/easing';
 import { INTENSITY_MAX, INTENSITY_MIN, isTuned, tuningParams } from '../model/feel';
@@ -36,13 +37,28 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
   const preset = getPreset(t.presetId);
   const params = tuningParams(t, preset.feel);
   const custom = isTuned(t);
-  const feelId = useId();
   const headingId = useId();
+  const feelId = useId();
   const tuneId = useId();
-  const intensityId = useId();
   const boxRef = useRef<HTMLDivElement>(null);
+  const tuneBtnRef = useRef<HTMLButtonElement>(null);
+  const tunePopRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef(anchor);
   anchorRef.current = anchor;
+  const toggleTuneRef = useRef(on.onFineTuneToggle);
+  toggleTuneRef.current = on.onFineTuneToggle;
+
+  // A press anywhere outside Fine-tune closes it. Its own button is left to toggle it.
+  useEffect(() => {
+    if (!fineTuneOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const el = e.target as Node | null;
+      if (!el || tunePopRef.current?.contains(el) || tuneBtnRef.current?.contains(el)) return;
+      toggleTuneRef.current();
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [fineTuneOpen]);
 
   // Follow the anchor through scrolling, zooming and pane resizes.
   useLayoutEffect(() => {
@@ -70,8 +86,26 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  const closeTune = () => {
+    on.onFineTuneToggle();
+    tuneBtnRef.current?.focus();
+  };
+
   return createPortal(
-    <div ref={boxRef} className="tpopover" role="dialog" aria-labelledby={headingId} style={{ visibility: 'hidden' }}>
+    <div
+      ref={boxRef}
+      className="tpopover"
+      role="dialog"
+      aria-labelledby={headingId}
+      style={{ visibility: 'hidden' }}
+      onKeyDown={(e) => {
+        // Escape closes Fine-tune first; the next one deselects as before.
+        if (e.key === 'Escape' && fineTuneOpen) {
+          e.stopPropagation();
+          closeTune();
+        }
+      }}
+    >
       <h2 ref={headingRef} id={headingId} className="tpopover-head" tabIndex={-1}>
         {preset.name} <span className="muted">· {formatDuration(t.duration)}</span>
       </h2>
@@ -79,94 +113,193 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
       <div className="tpopover-feel">
         <div className="feel-head">
           <label htmlFor={feelId} className="feel-label">
-            Feel <span className="muted">{custom ? 'Custom' : t.feel}</span>
+            Feel
           </label>
           {custom && (
-            <button type="button" className="link-btn" onClick={on.onResetTuning} title="Use the curve and intensity Feel gives">
-              Reset
-            </button>
+            <span className="feel-note" id={`${feelId}-note`}>
+              Fine-tune applied ·{' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  on.onResetTuning();
+                  // This link goes away; land on the slider it just re-enabled.
+                  requestAnimationFrame(() => document.getElementById(feelId)?.focus());
+                }}
+              >
+                Reset
+              </button>
+            </span>
           )}
         </div>
-        <div className="feel-row">
-          <span className="muted">Snappy</span>
-          <input
-            id={feelId}
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={t.feel}
-            aria-valuetext={`${t.feel} of 100, ${t.feel < 34 ? 'snappy' : t.feel > 66 ? 'smooth' : 'balanced'}`}
-            onPointerDown={() => on.onSliderPointerDown('Change feel')}
-            onChange={(e) => on.onFeelInput(Number(e.currentTarget.value))}
-          />
-          <span className="muted">Smooth</span>
-        </div>
-      </div>
-
-      <div className="tune">
-        <button type="button" className="tune-toggle" aria-expanded={fineTuneOpen} aria-controls={tuneId} onClick={on.onFineTuneToggle}>
-          <span className="tune-chevron" aria-hidden="true" />
-          Fine-tune
-        </button>
-        {fineTuneOpen && (
-          <div id={tuneId} className="tune-body">
-            <div className="tune-row">
-              <span className="tune-label" id={`${tuneId}-easing`}>
-                Easing
-              </span>
-              <div className="curves" role="group" aria-labelledby={`${tuneId}-easing`}>
-                {EASING_CURVES.map((c) => {
-                  const picked = sameCurve(c.bezier, params.bezier);
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      aria-pressed={picked}
-                      className={`curve${picked ? ' on' : ''}`}
-                      title={c.name}
-                      aria-label={c.name}
-                      onClick={() => on.onEasingPick(c.bezier)}
-                    >
-                      <CurveGlyph bezier={c.bezier} />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="tune-row">
-              <label className="tune-label" htmlFor={intensityId}>
-                {preset.intensityLabel}
-              </label>
-              <div className="feel-row">
-                <input
-                  id={intensityId}
-                  type="range"
-                  min={INTENSITY_MIN}
-                  max={INTENSITY_MAX}
-                  step={0.01}
-                  value={params.intensity}
-                  onPointerDown={() => on.onSliderPointerDown('Change intensity')}
-                  onChange={(e) => on.onIntensityInput(Number(e.currentTarget.value))}
-                />
-                <span className="tune-value">{params.intensity.toFixed(2)}</span>
-              </div>
-            </div>
-          </div>
-        )}
+        <TrackSlider
+          id={feelId}
+          describedBy={custom ? `${feelId}-note` : undefined}
+          disabled={custom}
+          start="Snappy"
+          end="Smooth"
+          min={0}
+          max={100}
+          step={1}
+          value={t.feel}
+          valueText={feelWord(t.feel)}
+          onPointerDown={() => on.onSliderPointerDown('Change feel')}
+          onChange={on.onFeelInput}
+        />
       </div>
 
       <div className="tpopover-actions">
-        <button type="button" className="btn btn-small" aria-pressed={looping} onClick={on.onToggleLoop}>
-          {looping ? 'Stop preview' : 'Preview loop'}
-        </button>
-        <button type="button" className="btn btn-small btn-danger" onClick={on.onRemove} aria-keyshortcuts="Delete">
-          Remove
+        <div className="tpopover-actions-start">
+          <button
+            ref={tuneBtnRef}
+            type="button"
+            className="btn-icon"
+            aria-expanded={fineTuneOpen}
+            aria-controls={fineTuneOpen ? tuneId : undefined}
+            onClick={on.onFineTuneToggle}
+            aria-label="Fine-tune"
+            title="Fine-tune"
+          >
+            <SlidersHorizontal size={16} aria-hidden="true" />
+          </button>
+          {fineTuneOpen && (
+            <div ref={tunePopRef} id={tuneId} className="tune-pop" role="group" aria-label="Fine-tune">
+              <div className="tune-head">
+                <span className="tune-title">Fine-tune</span>
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  onClick={() => custom && on.onResetTuning()}
+                  aria-disabled={!custom}
+                  title="Go back to the curve and intensity Feel gives"
+                >
+                  Reset
+                </button>
+              </div>
+              <div className="tune-row">
+                <span className="tune-label" id={`${tuneId}-easing`}>
+                  Easing
+                </span>
+                <div className="curves" role="group" aria-labelledby={`${tuneId}-easing`}>
+                  {EASING_CURVES.map((c) => {
+                    const picked = sameCurve(c.bezier, params.bezier);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        aria-pressed={picked}
+                        className={`curve${picked ? ' on' : ''}`}
+                        title={c.name}
+                        aria-label={c.name}
+                        onClick={() => on.onEasingPick(c.bezier)}
+                      >
+                        <CurveGlyph bezier={c.bezier} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <TrackSlider
+                label={preset.intensityLabel}
+                start={preset.intensityLabel}
+                end={params.intensity.toFixed(2)}
+                endIsValue
+                min={INTENSITY_MIN}
+                max={INTENSITY_MAX}
+                step={0.01}
+                value={params.intensity}
+                onPointerDown={() => on.onSliderPointerDown('Change intensity')}
+                onChange={on.onIntensityInput}
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            className="btn-icon"
+            aria-pressed={looping}
+            onClick={on.onToggleLoop}
+            aria-label="Preview loop"
+            title={looping ? 'Stop the preview loop' : 'Preview loop'}
+          >
+            {looping ? <RepeatOff size={16} aria-hidden="true" /> : <Repeat size={16} aria-hidden="true" />}
+          </button>
+        </div>
+        <button
+          type="button"
+          className="btn-icon btn-danger"
+          onClick={on.onRemove}
+          aria-label="Remove transition"
+          title="Remove transition (Delete)"
+          aria-keyshortcuts="Delete"
+        >
+          <Trash size={16} aria-hidden="true" />
         </button>
       </div>
     </div>,
     document.body,
   );
+}
+
+interface TrackSliderProps {
+  /** For a visible <label htmlFor>; without one, `label` names the input. */
+  id?: string;
+  /** Accessible name when there is no visible label. */
+  label?: string;
+  /** Id of text explaining the slider's state, e.g. why it is disabled. */
+  describedBy?: string;
+  disabled?: boolean;
+  /** Text inside the track at the left and right ends. */
+  start: string;
+  end: string;
+  /** `end` is the live value: drawn darker, in tabular figures. */
+  endIsValue?: boolean;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  valueText?: string;
+  onPointerDown: () => void;
+  onChange: (value: number) => void;
+}
+
+/** A filled track with its labels inside, over an invisible native range input. */
+function TrackSlider({ id, label, describedBy, disabled, start, end, endIsValue, min, max, step, value, valueText, onPointerDown, onChange }: TrackSliderProps) {
+  const t = max > min ? (value - min) / (max - min) : 0;
+  return (
+    <div className="track-slider" style={{ '--t': Math.min(1, Math.max(0, t)) } as CSSProperties}>
+      <span className="track-fill" aria-hidden="true" />
+      <span className="track-end" aria-hidden="true">
+        {start}
+      </span>
+      <span className={`track-end${endIsValue ? ' track-value' : ''}`} aria-hidden="true">
+        {end}
+      </span>
+      <span className="track-handle" aria-hidden="true" />
+      <input
+        id={id}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={label}
+        aria-describedby={describedBy}
+        aria-valuetext={valueText}
+        disabled={disabled}
+        onPointerDown={onPointerDown}
+        onChange={(e) => onChange(Number(e.currentTarget.value))}
+      />
+    </div>
+  );
+}
+
+/** Feel in words for screen readers; the number on its own means nothing. */
+function feelWord(feel: number): string {
+  if (feel <= 10) return 'Snappy';
+  if (feel <= 40) return 'Slightly snappy';
+  if (feel < 60) return 'Balanced';
+  if (feel < 90) return 'Slightly smooth';
+  return 'Smooth';
 }
 
 /** Where the popover goes for an anchor, or null when the anchor is scrolled out of view. */

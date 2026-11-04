@@ -7,6 +7,8 @@
   --subtle-2: #efefef;
   --border: #e8e8e8;
   --border-strong: #d4d4d4;
+  --slider-fill: #e2e2e2;
+  --slider-handle: #b8b8b8;
   --text: #111111;
   --muted: #6b6b6b;
   --primary: #111111;
@@ -434,11 +436,12 @@ h2[tabindex='-1']:focus-visible {
   white-space: nowrap;
 }
 
-.btn:hover:not(:disabled) {
+.btn:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--subtle);
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: 0.45;
   cursor: default;
 }
@@ -480,6 +483,16 @@ h2[tabindex='-1']:focus-visible {
 .btn-icon:disabled {
   color: var(--border-strong);
   cursor: default;
+}
+
+.btn-icon[aria-pressed='true'],
+.btn-icon[aria-expanded='true'] {
+  color: var(--primary);
+  background: var(--subtle);
+}
+
+.btn-icon.btn-danger {
+  color: var(--danger);
 }
 
 .btn-play {
@@ -857,87 +870,179 @@ h2[tabindex='-1']:focus-visible {
   outline: none;
 }
 
-.tpopover-feel {
+/*
+ * Popover sliders: a filled track with the end labels inside it. The native range input
+ * sits on top, invisible, so pointer and keyboard behave as usual. Its thumb
+ * is --h wide, so the drawn handle lands where the browser puts the value.
+ */
+.track-slider {
+  --h: 16px;
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  background: var(--subtle-2);
+  font-size: 12px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.track-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--h) + (100% - var(--h)) * var(--t));
+  border-radius: inherit;
+  background: var(--slider-fill);
+}
+
+.track-end {
+  position: relative;
+  pointer-events: none;
+}
+
+.track-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.track-handle {
+  position: absolute;
+  top: calc(50% - 10px);
+  left: calc(var(--h) / 2 + (100% - var(--h)) * var(--t) - 2px);
+  width: 3px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--slider-handle);
+  opacity: .5;
+  pointer-events: none;
+}
+
+.track-slider:hover:not(:has(input:disabled)) .track-handle,
+.track-slider:has(input:active) .track-handle {
+  background: var(--muted);
+}
+
+.track-slider input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  border-radius: inherit;
+  cursor: ew-resize;
+}
+
+/* Fine-tune overrides Feel: the track stays readable but plainly inactive. */
+.track-slider:has(input:disabled) {
+  opacity: 0.5;
+}
+
+.track-slider input:disabled {
+  cursor: default;
+}
+
+.track-slider input::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+
+.track-slider input::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--h);
+  height: 32px;
+  background: transparent;
+  border: 0;
+}
+
+.track-slider input::-moz-range-track {
+  background: transparent;
+}
+
+.track-slider input::-moz-range-thumb {
+  width: var(--h);
+  height: 32px;
+  background: transparent;
+  border: 0;
+}
+
+.tpopover-actions-start {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .tpopover-actions {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.feel-label {
-  font-weight: 500;
+.tpopover-feel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .feel-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  gap: 8px;
+}
+
+.feel-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.feel-note {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .link-btn {
   font: inherit;
-  font-size: 12px;
-  color: var(--muted);
+  color: var(--text);
   background: none;
   border: 0;
   padding: 0;
   text-decoration: underline;
+  text-underline-offset: 2px;
   cursor: pointer;
 }
 
-.link-btn:hover {
-  color: var(--text);
-}
-
-.tune {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
-  margin-top: -4px;
-}
-
-.tune-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 2px 0;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--muted);
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-
-.tune-toggle:hover,
-.tune-toggle[aria-expanded='true'] {
-  color: var(--text);
-}
-
-.tune-chevron {
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 120ms;
-}
-
-.tune-toggle[aria-expanded='true'] .tune-chevron {
-  transform: rotate(45deg);
-}
-
-.tune-body {
+/* Fine-tune: a second popover over the Feel area, rising from the actions row. */
+.tune-pop {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: calc(12px + 30px + 6px);
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-top: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+
+.tune-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tune-title {
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .tune-row {
@@ -949,12 +1054,6 @@ h2[tabindex='-1']:focus-visible {
 
 .tune-label {
   color: var(--muted);
-}
-
-.tune-value {
-  min-width: 28px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 .curves {
@@ -991,19 +1090,6 @@ h2[tabindex='-1']:focus-visible {
   stroke: currentColor;
   stroke-width: 1.75;
   stroke-linecap: round;
-}
-
-.feel-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-}
-
-.feel-row input[type='range'] {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--primary);
 }
 
 /* --- timeline pane -------------------------------------------------------- */
@@ -1367,8 +1453,8 @@ h2[tabindex='-1']:focus-visible {
   accent-color: var(--primary);
 }
 
-.zoom .btn {
-  margin-left: 6px;
+.zoom-fit {
+  margin-left: 4px;
 }
 
 .handle-strip {
