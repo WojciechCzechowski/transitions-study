@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Minus, Pause, Play, Plus, Redo2, Scan, SquareSplitHorizontal, Undo2 } from 'lucide-react';
+import { BetweenVerticalStart, Minus, Pause, Play, Plus, Redo2, Scan, SquareSplitHorizontal, Undo2 } from 'lucide-react';
 import { LIBRARY_INSERT } from '../config/study.config';
 import { getPreset, PRESETS, TRANSITION_DEFAULTS } from '../config/transitions.config';
 import type { FrameFeeder } from '../media/FrameFeeder';
@@ -21,11 +21,13 @@ import {
   updateGesture,
   type History,
 } from '../model/history';
+import { markedRange, markIn, markOut, NO_MARKS, type Marks } from '../model/marks';
 import { describeLimit, describeNoHandles } from '../model/messages';
 import {
   applyTransition,
   deleteClip,
-  insertClip,
+  insertAtFrame,
+  insertClipRange,
   moveClip,
   removeTransition,
   resetTuning,
@@ -53,12 +55,13 @@ import {
   type Doc,
   type Source,
 } from '../model/timeline';
-import { clampZoom, fitScale, insertionIndex, sliderToZoom, zoomToSlider } from '../model/timelineView';
+import { clampZoom, fitScale, sliderToZoom, zoomToSlider } from '../model/timelineView';
 import { formatClock, formatDuration, formatTimecode, type Frames } from '../model/time';
 import type { PreviewCandidate, PreviewController } from '../playback/PreviewController';
 import { Gallery } from './Gallery';
 import { isMac, isTextEntry, modKey } from './hooks';
-import { LibraryPanel } from './LibraryPanel';
+import { LibraryPanel, type ShownSource } from './LibraryPanel';
+import { SourceControls } from './SourceControls';
 import { ThumbsContext } from './Filmstrip';
 import { Timeline, type Selection, type TimelineApi } from './Timeline';
 import { TransitionPopover } from './TransitionPopover';
@@ -78,6 +81,8 @@ interface Props {
   /** Shell slots this editor renders into. */
   sidebarEl: HTMLElement;
   timelineEl: HTMLElement;
+  /** Layer over the preview canvas, for the Library clip controls. */
+  previewEl: HTMLElement;
 }
 
 type Tab = 'library' | 'transitions';
@@ -133,7 +138,7 @@ const SPLIT_REASONS:Record<Exclude<SplitResult, { ok: true }>['reason'], string>
  * when the clip manifest reloads, which resets history. Renders
  * the sidebar (Library / Transitions) and the timeline pane into the shell's slots.
  */
-export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, reducedMotion, announce, sidebarEl, timelineEl }: Props) {
+export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, reducedMotion, announce, sidebarEl, timelineEl, previewEl }: Props) {
   const [history, setHistory] = useState<History<Doc>>(() => createHistory(baseDoc));
   const doc = history.present;
 
@@ -154,6 +159,10 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const [libDrag, setLibDrag] = useState<{ sourceId: string; x: number; y: number; index: number | null } | null>(null);
   const [presetDrag, setPresetDrag] = useState<PresetDrag | null>(null);
   const [, setFocusTick] = useState(0);
+  /** In/out marks per Library clip. Not part of undo: they describe the Library, not the edit. */
+  const [marks, setMarks] = useState<Readonly<Record<string, Marks>>>({});
+  /** The Library clip Insert adds: the one last played in the preview. */
+  const [insertSourceId, setInsertSourceId] = useState<string | null>(null);
 
   const pickerListRef = useRef<HTMLDivElement>(null);
   const editHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -184,6 +193,15 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const sourceIndex = useMemo(() => new Map(sources.map((s, i) => [s.id, i] as const)), [sources]);
   const sourceTone = useCallback((id: string) => sourceIndex.get(id) ?? 0, [sourceIndex]);
   const sourceLabel = useCallback((id: string) => sources.find((s) => s.id === id)?.label ?? id, [sources]);
+  // The Library clip shown in the preview, as a string so per-frame updates don't re-render the editor.
+  const shownKey = useSyncExternalStore(controller.subscribeSource, () => {
+    const s = controller.getSourceState();
+    return s ? `${s.playing ? 1 : 0}${s.sourceId}` : '';
+  });
+  const shown: ShownSource | null = useMemo(
+    () => (shownKey ? { sourceId: shownKey.slice(1), playing: shownKey[0] === '1' } : null),
+    [shownKey],
+  );
   const splitCheck = useMemo(() => splitClip(doc, playhead), [doc, playhead]);
 
   const setTab = (t: Tab) => {
@@ -476,7 +494,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     const source = sources.find((s) => s.id === sourceId);
     if (!source) return;
     controller.endPreview();
-    const r = insertClip(doc, source, index, LIBRARY_INSERT);
+    const r = insertClipRange(doc, source, index, markedRange(source.frames, marks[source.id], LIBRARY_INSERT));
     commitDoc(r.doc, `Add ${source.label}`);
     setSelection({ kind: 'clip', id: r.clip.id });
     setTargetCutKey(null);
@@ -617,9 +635,81 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   };
 
   const togglePlay = () => {
-    if (controller.isPreviewing) controller.togglePreviewPlayback();
+    if (controller.isShowingSource) controller.toggleSourcePlayback();
+    else if (controller.isPreviewing) controller.togglePreviewPlayback();
     else controller.togglePlay();
   };
+
+  // --- library clip in the preview ----------------------------------------------
+
+  const playSourceFromStart = (sourceId: string) => {
+    const s = sources.find((x) => x.id === sourceId);
+    if (!s || !ready) return;
+    controller.showSource(s.id, s.label, s.frames);
+    setInsertSourceId(s.id);
+    announce(`Playing ${s.label} in the preview. Escape returns to the timeline`);
+  };
+  const toggleSource = (sourceId: string) => {
+    if (controller.getSourceState()?.sourceId === sourceId) controller.toggleSourcePlayback();
+    else playSourceFromStart(sourceId);
+  };
+
+  const setShownMarks = (update: (m: Marks) => Marks) => {
+    const s = controller.getSourceState();
+    if (!s) return;
+    setMarks((all) => ({ ...all, [s.sourceId]: update(all[s.sourceId] ?? NO_MARKS) }));
+  };
+  const markShownIn = (frame: Frames) => setShownMarks((m) => markIn(m, frame));
+  const markShownOut = (frame: Frames) => setShownMarks((m) => markOut(m, frame));
+  const clearShownMarks = () => setShownMarks(() => NO_MARKS);
+
+  const insertSourceClip = sources.find((s) => s.id === insertSourceId) ?? null;
+  const insertCheck = useMemo(
+    () =>
+      insertSourceClip
+        ? insertAtFrame(doc, insertSourceClip, playhead, markedRange(insertSourceClip.frames, marks[insertSourceClip.id], LIBRARY_INSERT))
+        : null,
+    [doc, insertSourceClip, playhead, marks],
+  );
+  const insertReason = !insertSourceClip
+    ? 'Play a Library clip first'
+    : insertCheck && !insertCheck.ok
+      ? 'The playhead is inside a transition'
+      : null;
+
+  /** Insert the last played Library clip (its marked part) at the playhead; the playhead moves to its end. */
+  const doInsert = () => {
+    if (!ready) return;
+    if (!insertSourceClip || !insertCheck) {
+      announce('Play a Library clip first, then insert it');
+      return;
+    }
+    if (!insertCheck.ok) {
+      announce('The playhead is inside a transition; move it out to insert');
+      return;
+    }
+    const { doc: next, clip, at } = insertCheck;
+    controller.pause();
+    controller.endPreview();
+    controller.endSource();
+    commitDoc(next, `Insert ${insertSourceClip.label}`);
+    setSelection({ kind: 'clip', id: clip.id });
+    setTargetCutKey(null);
+    const length = clip.sourceOut - clip.sourceIn;
+    setPlayhead(at + length);
+    announce(`${insertSourceClip.label} inserted at ${formatTimecode(at)}, ${formatDuration(length)}`);
+  };
+
+  // Working in the timeline brings the preview back to it.
+  const showingSource = shown !== null;
+  useEffect(() => {
+    if (!showingSource) return;
+    const onDown = (e: globalThis.PointerEvent) => {
+      if (e.target instanceof Node && timelineEl.contains(e.target)) controller.endSource();
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [showingSource, timelineEl, controller]);
 
   const onScrubStart = () => {
     controller.pause();
@@ -629,7 +719,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   // --- global shortcuts --------------------------------------------------------
 
   const hasTarget = targetCutKey !== null;
-  const shortcuts = { doUndo, doRedo, togglePlay, deleteSelected, leavePicker, select, doSplit, onPresetDragEnd, selection, hasTarget, looping };
+  const shortcuts = { doUndo, doRedo, togglePlay, deleteSelected, leavePicker, select, doSplit, doInsert, markShownIn, markShownOut, onPresetDragEnd, selection, hasTarget, looping };
   const latest = useRef(shortcuts);
   useLayoutEffect(() => {
     latest.current = shortcuts;
@@ -667,9 +757,18 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       } else if (e.key.toLowerCase() === 's' && !e.repeat) {
         e.preventDefault();
         s.doSplit();
+      } else if (e.key.toLowerCase() === 'w' && !e.repeat) {
+        e.preventDefault();
+        s.doInsert();
+      } else if ((e.key.toLowerCase() === 'i' || e.key.toLowerCase() === 'o') && controller.isShowingSource) {
+        e.preventDefault();
+        const frame = controller.getSourceState()?.frame ?? 0;
+        if (e.key.toLowerCase() === 'i') s.markShownIn(frame);
+        else s.markShownOut(frame);
       } else if (e.key === 'Escape') {
         if (libDragRef.current) setLibDrag(null);
         else if (presetDragRef.current) s.onPresetDragEnd(false);
+        else if (controller.isShowingSource) controller.endSource();
         else if (s.looping) controller.endPreview();
         else if (s.selection || s.hasTarget) s.select(null);
       }
@@ -768,12 +867,16 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
           <LibraryPanel
             sources={sources}
             feeder={feeder}
+            thumbs={thumbs}
             ready={ready}
             sourceTone={sourceTone}
+            shown={shown}
+            marks={marks}
+            onTogglePlay={toggleSource}
+            onPlayFromStart={playSourceFromStart}
             onDragStart={onLibDragStart}
             onDragMove={onLibDragMove}
             onDragEnd={onLibDragEnd}
-            onAdd={(id) => insertSource(id, insertionIndex(doc, playhead))}
           />
         ) : (
           <TransitionsPanel
@@ -854,6 +957,22 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
             aria-keyshortcuts="S"
           >
             <SquareSplitHorizontal size={ICON} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={doInsert}
+            disabled={!ready || insertReason !== null}
+            aria-label={
+              insertSourceClip
+                ? `Insert ${insertSourceClip.label} at playhead${insertReason ? ` (${insertReason})` : ''}`
+                : `Insert at playhead (${insertReason})`
+            }
+            data-tip={insertReason ?? `Insert ${insertSourceClip?.label ?? ''} at playhead`}
+            data-keys={insertReason ? undefined : 'W'}
+            aria-keyshortcuts="W"
+          >
+            <BetweenVerticalStart size={ICON} aria-hidden="true" />
           </button>
         </div>
         <button
@@ -939,6 +1058,17 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   return (
     <>
       {createPortal(sidebar, sidebarEl)}
+      {shown &&
+        createPortal(
+          <SourceControls
+            controller={controller}
+            marks={marks[shown.sourceId]}
+            onMarkIn={markShownIn}
+            onMarkOut={markShownOut}
+            onClearMarks={clearShownMarks}
+          />,
+          previewEl,
+        )}
       {createPortal(<ThumbsContext.Provider value={thumbs}>{timeline}</ThumbsContext.Provider>, timelineEl)}
       {selectedTransition && selectedCut && (
         <TransitionPopover

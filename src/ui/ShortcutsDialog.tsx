@@ -26,9 +26,11 @@ const GROUPS: { title: string; items: Shortcut[] }[] = [
     title: 'Editing',
     items: [
       { keys: k('S'), action: 'Split at the playhead' },
+      { keys: k('W'), action: 'Insert the last played Library clip at the playhead' },
+      { keys: k('I', 'O'), action: 'Mark in / out on the Library clip in the preview' },
       { keys: k('Delete'), action: 'Remove the selection' },
       { keys: k('Alt', '←', '→'), action: 'Move the focused clip' },
-      { keys: k('Esc'), action: 'Step back: stop a loop, leave the picker, or clear the selection' },
+      { keys: k('Esc'), action: 'Step back: return from a Library clip to the timeline, stop a loop, leave the picker, or clear the selection' },
     ],
   },
   {

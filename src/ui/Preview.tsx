@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type Ref } from 'react';
 import { StudyError } from '../media/errors';
 import type { PreviewController } from '../playback/PreviewController';
 import { Renderer } from '../render/Renderer';
@@ -13,6 +13,8 @@ interface Props {
   controller: PreviewController;
   load: LoadState;
   onRetry: () => void;
+  /** Layer over the canvas the editor portals its own controls into (the Library clip bar). */
+  slotRef: Ref<HTMLDivElement>;
 }
 
 /**
@@ -20,7 +22,7 @@ interface Props {
  * buffer is resized only from a ResizeObserver, which redraws in the same
  * callback so a resize never shows a cleared canvas.
  */
-export function Preview({ controller, load, onRetry }: Props) {
+export function Preview({ controller, load, onRetry, slotRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [glError, setGlError] = useState<StudyError | null>(null);
 
@@ -56,6 +58,7 @@ export function Preview({ controller, load, onRetry }: Props) {
   return (
     <div className="preview">
       <canvas ref={canvasRef} className="preview-canvas" aria-label="Preview" role="img" />
+      <div ref={slotRef} className="preview-slot" />
       {error ? (
         <div className="preview-overlay preview-error" role="alert">
           <h2>{error.kind === 'webgl' ? 'Preview unavailable' : 'Couldn’t load the clips'}</h2>

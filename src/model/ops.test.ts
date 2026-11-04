@@ -3,7 +3,9 @@ import { cutAt, generous, makeDoc, noHandleB, shortB, SOURCES } from './fixtures
 import {
   applyTransition,
   deleteClip,
+  insertAtFrame,
   insertClip,
+  insertClipRange,
   insertRange,
   moveClip,
   removeTransition,
@@ -162,6 +164,62 @@ describe('insertClip', () => {
     expect(doc.transitions).toHaveLength(1);
     doc = insertClip(doc, SOURCES[1], 1, HANDLES).doc;
     expect(doc.transitions).toHaveLength(0);
+  });
+});
+
+describe('insertAtFrame', () => {
+  const RANGE = { sourceIn: 10, sourceOut: 40 }; // 30 frames
+  const ids = (doc: Doc) => doc.clips.map((c) => `${c.sourceId}${c.sourceIn}-${c.sourceOut}`);
+
+  it('splits the clip under the playhead and puts the new clip in the gap', () => {
+    const r = insertAtFrame(shortB(), SOURCES[1], 30, RANGE);
+    if (!r.ok) throw new Error('expected insert');
+    expect(ids(r.doc)).toEqual(['a15-45', 'b10-40', 'a45-75', 'b18-78']);
+    expect(r.at).toBe(30);
+    expect(timelineLength(r.doc)).toBe(150);
+  });
+
+  it('goes straight in on a cut and at either end', () => {
+    const onCut = insertAtFrame(shortB(), SOURCES[1], 60, RANGE);
+    if (!onCut.ok) throw new Error('expected insert');
+    expect(ids(onCut.doc)).toEqual(['a15-75', 'b10-40', 'b18-78']);
+    expect(onCut.at).toBe(60);
+
+    const start = insertAtFrame(shortB(), SOURCES[1], 0, RANGE);
+    if (!start.ok) throw new Error('expected insert');
+    expect(ids(start.doc)[0]).toBe('b10-40');
+    expect(start.at).toBe(0);
+
+    const end = insertAtFrame(shortB(), SOURCES[1], 120, RANGE);
+    if (!end.ok) throw new Error('expected insert');
+    expect(ids(end.doc).at(-1)).toBe('b10-40');
+    expect(end.at).toBe(120);
+  });
+
+  it('fills an empty timeline', () => {
+    const empty = deleteClip(deleteClip(shortB(), 'c1'), 'c2');
+    const r = insertAtFrame(empty, SOURCES[0], 0, RANGE);
+    if (!r.ok) throw new Error('expected insert');
+    expect(ids(r.doc)).toEqual(['a10-40']);
+  });
+
+  it('refuses inside a transition, including exactly on its cut, and keeps other transitions', () => {
+    const doc = applied(shortB()); // spans 48–71
+    expect(insertAtFrame(doc, SOURCES[1], 60, RANGE)).toMatchObject({ ok: false, reason: 'in-transition' });
+    expect(insertAtFrame(doc, SOURCES[1], 50, RANGE)).toMatchObject({ ok: false, reason: 'in-transition' });
+    const r = insertAtFrame(doc, SOURCES[1], 30, RANGE);
+    if (!r.ok) throw new Error('expected insert');
+    expect(r.doc.transitions).toHaveLength(1);
+    const last = cuts(r.doc)[2]!;
+    expect(last.frame).toBe(90);
+    expect(transitionAt(r.doc, last.key)).toBeTruthy();
+  });
+
+  it('keeps the inserted range inside the source', () => {
+    const { clip } = insertClipRange(shortB(), SOURCES[0], 0, { sourceIn: -5, sourceOut: 500 });
+    expect(clip).toMatchObject({ sourceIn: 0, sourceOut: 120 });
+    const tiny = insertClipRange(shortB(), SOURCES[0], 0, { sourceIn: 50, sourceOut: 50 }).clip;
+    expect(tiny.sourceOut - tiny.sourceIn).toBe(1);
   });
 });
 

@@ -33,6 +33,7 @@ export function App() {
   const [attempt, setAttempt] = useState(0);
   const [sidebarEl, setSidebarEl] = useState<HTMLElement | null>(null);
   const [timelineEl, setTimelineEl] = useState<HTMLElement | null>(null);
+  const [previewSlotEl, setPreviewSlotEl] = useState<HTMLDivElement | null>(null);
   const [message, announce] = useAnnouncer();
 
   useEffect(() => installModalityTracking(), []);
@@ -199,11 +200,11 @@ export function App() {
     <>
       <Shell
         header={header}
-        preview={<Preview controller={controller} load={shownLoad} onRetry={() => setAttempt((a) => a + 1)} />}
+        preview={<Preview controller={controller} load={shownLoad} onRetry={() => setAttempt((a) => a + 1)} slotRef={setPreviewSlotEl} />}
         sidebarRef={setSidebarEl}
         timelineRef={setTimelineEl}
       />
-      {docResult?.ok && sidebarEl && timelineEl && (
+      {docResult?.ok && sidebarEl && timelineEl && previewSlotEl && (
         <Editor
           key={manifestVersion}
           baseDoc={docResult.doc}
@@ -216,6 +217,7 @@ export function App() {
           announce={announce}
           sidebarEl={sidebarEl}
           timelineEl={timelineEl}
+          previewEl={previewSlotEl}
         />
       )}
 

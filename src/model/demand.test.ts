@@ -36,6 +36,14 @@ describe('wantedFrames', () => {
     expect(keys(w)).toEqual(['a:57', 'a:58', 'a:55', 'a:56']);
   });
 
+  it('plays a Library clip on its own, ignoring the timeline', () => {
+    const playing = { kind: 'source', sourceId: 'b', frames: 120, frame: 117, playing: true } as const;
+    expect(keys(wantedFrames(shortB(), playing, opts()))).toEqual(['b:117', 'b:118', 'b:119']);
+    const still = { ...playing, frame: 0, playing: false };
+    expect(keys(wantedFrames(shortB(), still, opts()))).toEqual(['b:0', 'b:1', 'b:2']);
+    expect(wantedFrames(shortB(), { ...playing, frame: 0 }, opts({ lookahead: 50, maxFrames: 4 }))).toHaveLength(4);
+  });
+
   it('stays inside the timeline and the budget', () => {
     expect(keys(wantedFrames(shortB(), { kind: 'playing', playhead: 118 }, opts()))).toEqual(['b:76', 'b:77']);
     expect(wantedFrames(shortB(), { kind: 'playing', playhead: 0 }, opts({ lookahead: 50, maxFrames: 3 }))).toHaveLength(3);

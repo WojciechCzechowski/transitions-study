@@ -8,6 +8,10 @@
  * decoded yet the nearest decoded frame of the same clip is shown until it
  * arrives, which triggers a redraw. The playback clock never waits for the
  * decoder.
+ *
+ * Besides the timeline it can show one Library clip on its own (source
+ * preview). That mode is temporary like a preset preview: playing the
+ * timeline, previewing a preset or moving the playhead returns to the timeline.
  */
 import { getPreset, TRANSITION_DEFAULTS } from '../config/transitions.config';
 import { DECODE } from '../config/study.config';
@@ -29,6 +33,17 @@ export interface PreviewCandidate {
   readonly feel: number;
   readonly easing?: Bezier;
   readonly intensity?: number;
+}
+
+/** A Library clip shown on its own in the preview. */
+export interface SourceState {
+  readonly sourceId: string;
+  readonly label: string;
+  /** Source length. */
+  readonly frames: Frames;
+  /** Source frame on screen. */
+  readonly frame: Frames;
+  readonly playing: boolean;
 }
 
 export interface ControllerCallbacks {
@@ -58,6 +73,12 @@ type Mode =
       readonly startTime: number;
       readonly elapsedAtStart: Frames;
       readonly frame: Frames;
+    }
+  | {
+      readonly kind: 'source';
+      readonly state: SourceState;
+      readonly startTime: number;
+      readonly startFrame: Frames;
     };
 
 export interface PreviewOptions {
@@ -85,6 +106,8 @@ export class PreviewController {
   private playStats = { shown: 0, inexact: 0 };
   private firstFrameWaiters: (() => void)[] = [];
   private drewOnce = false;
+  private sourceListeners = new Set<() => void>();
+  private sourceState: SourceState | null = null;
 
   constructor(
     private readonly store: FrameStore,
@@ -141,6 +164,7 @@ export class PreviewController {
   setPlayhead(frame: Frames) {
     if (frame === this.playhead) return;
     this.playhead = frame;
+    this.leaveSource(false);
     if (this.mode.kind === 'playing') this.mode = { kind: 'playing', startFrame: frame, startTime: this.now() };
     this.draw();
   }
@@ -157,6 +181,18 @@ export class PreviewController {
     return this.mode.kind === 'preview' && this.mode.playing;
   }
 
+  get isShowingSource() {
+    return this.mode.kind === 'source';
+  }
+
+  /** For useSyncExternalStore: the Library clip on screen, or null when showing the timeline. */
+  readonly subscribeSource = (listener: () => void): (() => void) => {
+    this.sourceListeners.add(listener);
+    return () => this.sourceListeners.delete(listener);
+  };
+
+  readonly getSourceState = (): SourceState | null => this.sourceState;
+
   // --- timeline playback -----------------------------------------------------
 
   play() {
@@ -164,6 +200,7 @@ export class PreviewController {
     const last = timelineLength(this.doc) - 1;
     if (last < 0) return;
     this.leavePreview(false);
+    this.leaveSource(false);
     const start = this.playhead >= last ? 0 : this.playhead;
     this.playhead = start;
     this.playStats = { shown: 0, inexact: 0 };
@@ -202,6 +239,7 @@ export class PreviewController {
       this.mode = { kind: 'idle' };
       this.cb.onPlayingChange(false);
     }
+    this.leaveSource(false);
     const cutInfo = cutByKey(doc, candidate.cutKey);
     if (!cutInfo) return;
     const { leadIn, tail, hold } = TRANSITION_DEFAULTS.preview;
@@ -255,6 +293,53 @@ export class PreviewController {
     this.leavePreview(true);
   }
 
+  // --- source preview (a Library clip on its own) -------------------------------
+
+  /** Play a Library clip from its start, in place of the timeline. */
+  showSource(sourceId: string, label: string, frames: Frames) {
+    if (!this.doc || !this.ready || frames <= 0) return;
+    if (this.mode.kind === 'playing') {
+      this.cb.onPlayingChange(false);
+      this.logPlayStats();
+    }
+    if (this.mode.kind === 'preview') this.cb.onPreviewChange({ active: false, playing: false });
+    this.setSource({ sourceId, label, frames, frame: 0, playing: frames > 1 });
+    this.draw();
+    this.schedule();
+  }
+
+  /** Space / the play button on the clip. Finished, it restarts from the beginning. */
+  toggleSourcePlayback() {
+    const m = this.mode;
+    if (m.kind !== 'source') return;
+    const s = m.state;
+    if (s.playing) {
+      this.setSource({ ...s, playing: false });
+    } else {
+      const frame = s.frame >= s.frames - 1 ? 0 : s.frame;
+      this.setSource({ ...s, frame, playing: s.frames > 1 });
+      this.schedule();
+    }
+    this.draw();
+  }
+
+  /** Show another frame of the shown clip (scrubbing its progress bar). Keeps playing if it was. */
+  seekSource(frame: Frames) {
+    const m = this.mode;
+    if (m.kind !== 'source') return;
+    const s = m.state;
+    const f = clamp(Math.round(frame), 0, s.frames - 1);
+    if (f === s.frame && !s.playing) return;
+    this.setSource({ ...s, frame: f, playing: s.playing && f < s.frames - 1 });
+    this.draw();
+    if (this.mode.kind === 'source' && this.mode.state.playing) this.schedule();
+  }
+
+  /** Back to the timeline. */
+  endSource() {
+    this.leaveSource(true);
+  }
+
   /** Redraw unconditionally, e.g. after a canvas resize (which clears it). */
   redrawNow() {
     this.lastKey = '';
@@ -267,6 +352,25 @@ export class PreviewController {
   }
 
   // --- internals -------------------------------------------------------------
+
+  /** Enter or update source mode; the clock restarts from `s.frame`. */
+  private setSource(s: SourceState) {
+    this.mode = { kind: 'source', state: s, startTime: this.now(), startFrame: s.frame };
+    this.publishSource(s);
+  }
+
+  private publishSource(s: SourceState | null) {
+    if (s === this.sourceState) return;
+    this.sourceState = s;
+    for (const l of this.sourceListeners) l();
+  }
+
+  private leaveSource(draw: boolean) {
+    if (this.mode.kind !== 'source') return;
+    this.mode = { kind: 'idle' };
+    this.publishSource(null);
+    if (draw) this.draw();
+  }
 
   private leavePreview(draw: boolean) {
     if (this.mode.kind !== 'preview') return;
@@ -290,7 +394,11 @@ export class PreviewController {
     const m = this.mode;
     let mode: DemandMode;
     let key: string;
-    if (m.kind === 'preview') {
+    if (m.kind === 'source') {
+      const s = m.state;
+      mode = { kind: 'source', sourceId: s.sourceId, frames: s.frames, frame: s.frame, playing: s.playing };
+      key = `src|${s.sourceId}|${s.frame}|${s.playing}`;
+    } else if (m.kind === 'preview') {
       mode = { kind: 'preview', frame: m.frame, range: m.range, override: { cutKey: m.candidate.cutKey, look: m.candidate } };
       const c = m.candidate;
       key = `p|${m.frame}|${m.range.start}|${m.range.end}|${c.cutKey}|${c.presetId}|${c.duration}`;
@@ -323,6 +431,7 @@ export class PreviewController {
     if (this.mode.kind === 'playing') this.cb.onPlayingChange(false);
     if (this.mode.kind === 'preview') this.cb.onPreviewChange({ active: false, playing: false });
     this.mode = { kind: 'idle' };
+    this.publishSource(null);
   }
 
   private schedule() {
@@ -350,6 +459,17 @@ export class PreviewController {
       } else {
         more = true;
       }
+    } else if (m.kind === 'source' && m.state.playing) {
+      const s = m.state;
+      const last = s.frames - 1;
+      const frame = Math.min(last, m.startFrame + elapsedFrames(m.startTime));
+      const done = frame >= last;
+      if (frame !== s.frame || done) {
+        const next = { ...s, frame, playing: !done };
+        this.mode = { ...m, state: next };
+        this.publishSource(next);
+      }
+      more = !done;
     } else if (m.kind === 'preview' && m.playing) {
       const elapsed = m.elapsedAtStart + elapsedFrames(m.startTime);
       if (m.once) {
@@ -383,6 +503,18 @@ export class PreviewController {
     if (!renderer || !doc || !this.ready || renderer.isLost) return;
 
     const m = this.mode;
+    if (m.kind === 'source') {
+      this.updateDemand(doc);
+      const look = this.store.get(m.state.sourceId, m.state.frame);
+      if (!look) return;
+      const key = `s|${m.state.sourceId}|${look.frame}`;
+      if (key !== this.lastKey) {
+        renderer.drawSingle(look.bitmap);
+        this.lastKey = key;
+      }
+      this.markDrawn();
+      return;
+    }
     const isPreview = m.kind === 'preview';
     const t = isPreview ? m.frame : this.playhead;
     const override: TransitionOverride | undefined = isPreview

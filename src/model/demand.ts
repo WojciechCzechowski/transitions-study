@@ -6,7 +6,9 @@ import type { Frames } from './time';
 export type DemandMode =
   | { readonly kind: 'idle'; readonly playhead: Frames }
   | { readonly kind: 'playing'; readonly playhead: Frames }
-  | { readonly kind: 'preview'; readonly frame: Frames; readonly range: LoopRange; readonly override?: TransitionOverride };
+  | { readonly kind: 'preview'; readonly frame: Frames; readonly range: LoopRange; readonly override?: TransitionOverride }
+  /** A Library clip on its own (source preview), independent of the timeline. */
+  | { readonly kind: 'source'; readonly sourceId: string; readonly frames: Frames; readonly frame: Frames; readonly playing: boolean };
 
 export interface DemandOptions {
   /** Timeline frames ahead of the playhead to have ready while playing. */
@@ -20,6 +22,22 @@ export interface DemandOptions {
 
 export const frameRefKey = (r: FrameRef) => `${r.sourceId}:${r.frame}`;
 
+/** Source frames for a source preview: ahead while playing, around the frame while still. */
+function sourceOrder(mode: Extract<DemandMode, { kind: 'source' }>, o: DemandOptions): FrameRef[] {
+  const out: FrameRef[] = [];
+  const push = (f: Frames) => {
+    if (f >= 0 && f < mode.frames) out.push({ sourceId: mode.sourceId, frame: f });
+  };
+  if (mode.playing) {
+    for (let i = 0; i <= o.lookahead; i++) push(mode.frame + i);
+  } else {
+    push(mode.frame);
+    for (let i = 1; i <= o.scrubAhead; i++) push(mode.frame + i);
+    for (let i = 1; i <= o.scrubBehind; i++) push(mode.frame - i);
+  }
+  return out;
+}
+
 /** Timeline frames in the order they are needed. */
 function timelineOrder(len: Frames, mode: DemandMode, o: DemandOptions): Frames[] {
   const out: Frames[] = [];
@@ -32,7 +50,7 @@ function timelineOrder(len: Frames, mode: DemandMode, o: DemandOptions): Frames[
     for (let i = 1; i <= o.scrubBehind; i++) push(mode.playhead - i);
   } else if (mode.kind === 'playing') {
     for (let i = 0; i <= o.lookahead; i++) push(mode.playhead + i);
-  } else {
+  } else if (mode.kind === 'preview') {
     const { start, end } = mode.range;
     const at = Math.min(Math.max(mode.frame, start), end - 1);
     for (let t = at; t < end; t++) push(t);
@@ -46,6 +64,7 @@ function timelineOrder(len: Frames, mode: DemandMode, o: DemandOptions): Frames[
  * cut off at the cache budget. A frame inside a transition needs both sides.
  */
 export function wantedFrames(doc: Doc, mode: DemandMode, o: DemandOptions): FrameRef[] {
+  if (mode.kind === 'source') return sourceOrder(mode, o).slice(0, Math.max(0, o.maxFrames));
   const len = timelineLength(doc);
   if (len <= 0 || o.maxFrames <= 0) return [];
   const override = mode.kind === 'preview' ? mode.override : undefined;

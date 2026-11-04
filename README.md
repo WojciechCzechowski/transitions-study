@@ -1,6 +1,6 @@
 # Transition study
 
-An unofficial interaction study of transitions in a very simple browser video editor: drag prepared clips from the Library onto a magnetic V1 track, trim them, split them at the playhead and put transitions on any cut. React, TypeScript, Vite, Vitest and WebGL2. No backend.
+An unofficial interaction study of transitions in a very simple browser video editor: skim or play prepared clips in the Library, mark in and out, drag or insert them onto a magnetic V1 track, trim them, split them at the playhead and put transitions on any cut. React, TypeScript, Vite, Vitest and WebGL2. No backend.
 
 The Library is the clips listed in `public/clips/manifest.json` (at least two; the starting timeline uses the first two). The app downloads each MP4, reads its frame table, and decodes frames on demand with WebCodecs, one keyframe group (10 frames) at a time, into a cache capped at 320 MB (`DECODE` in `src/config/study.config.ts`). Only the frames around the playhead, the playback lookahead and the transition preview loop are kept, so memory does not grow with clip length and every frame is still exact. If decoding falls behind, the preview shows the nearest decoded frame and playback keeps time; on pause the console says how many frames were stand-ins. It needs a browser with WebCodecs (current Chrome, Edge, Safari or Firefox).
 

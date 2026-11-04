@@ -182,13 +182,65 @@ export function insertRange(frames: Frames, handles: InsertHandles): { sourceIn:
   return { sourceIn: head, sourceOut: frames - tail };
 }
 
-/** Insert a new instance of `source` at clip boundary `index` (0 … clips.length). */
+export interface SourceRange {
+  readonly sourceIn: Frames;
+  /** Exclusive. */
+  readonly sourceOut: Frames;
+}
+
+/** Insert a new instance of `source` at clip boundary `index` (0 … clips.length), with default handles. */
 export function insertClip(doc: Doc, source: Source, index: number, handles: InsertHandles): { doc: Doc; clip: Clip } {
+  return insertClipRange(doc, source, index, insertRange(source.frames, handles));
+}
+
+/** Insert the `range` part of `source` at clip boundary `index` (0 … clips.length). */
+export function insertClipRange(doc: Doc, source: Source, index: number, range: SourceRange): { doc: Doc; clip: Clip } {
   const at = Math.max(0, Math.min(doc.clips.length, Math.round(index)));
-  const { sourceIn, sourceOut } = insertRange(source.frames, handles);
+  const sourceIn = Math.max(0, Math.min(source.frames - 1, Math.round(range.sourceIn)));
+  const sourceOut = Math.max(sourceIn + 1, Math.min(source.frames, Math.round(range.sourceOut)));
   const clip = clipFromSource(source, `c${doc.nextId}`, sourceIn, sourceOut);
   const clips = [...doc.clips.slice(0, at), clip, ...doc.clips.slice(at)];
   return { doc: normalize({ ...doc, clips, nextId: doc.nextId + 1 }), clip };
+}
+
+export type InsertAtResult =
+  | { ok: true; doc: Doc; clip: Clip; /** Timeline frame where the new clip starts. */ at: Frames }
+  | { ok: false; reason: 'in-transition'; transition: Transition };
+
+/**
+ * Insert at timeline frame t, rippling later clips right. Inside a clip it
+ * splits that clip and puts the new one in the gap; on a cut, or at either
+ * end of the timeline, it goes straight in. Refused inside a transition
+ * (including exactly on a cut that has one), since that would remove it.
+ */
+export function insertAtFrame(doc: Doc, source: Source, t: Frames, range: SourceRange): InsertAtResult {
+  const len = timelineLength(doc);
+  let base = doc;
+  let index: number;
+  if (doc.clips.length === 0 || t <= 0) {
+    index = 0;
+  } else if (t >= len) {
+    index = doc.clips.length;
+  } else {
+    const i = clipIndexAt(doc, t);
+    if (t === clipStarts(doc)[i]) {
+      const tr = transitionAt(doc, cutKeyOf(doc.clips[i - 1]!.id, doc.clips[i]!.id));
+      if (tr) return { ok: false, reason: 'in-transition', transition: tr };
+      index = i;
+    } else {
+      const split = splitClip(doc, t);
+      if (!split.ok) {
+        if (split.reason === 'in-transition' && split.transition) return { ok: false, reason: 'in-transition', transition: split.transition };
+        index = i;
+      } else {
+        base = split.doc;
+        index = clipIndexById(base, split.right.id);
+      }
+    }
+  }
+  const r = insertClipRange(base, source, index, range);
+  const at = clipStarts(r.doc)[clipIndexById(r.doc, r.clip.id)] ?? 0;
+  return { ok: true, doc: r.doc, clip: r.clip, at };
 }
 
 /** Move a clip to boundary `toIndex` of the current order. Same reference when it wouldn't move. */
