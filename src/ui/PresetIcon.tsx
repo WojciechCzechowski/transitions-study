@@ -10,8 +10,8 @@ export function PresetIcon({ id }: { id: PresetId }) {
   );
 }
 
-const A = 'var(--clip-a)';
-const B = 'var(--clip-b)';
+const A = 'var(--clip-a-strong)';
+const B = 'var(--clip-b-strong)';
 
 const GLYPHS: Record<PresetId, ReactNode> = {
   crossDissolve: (

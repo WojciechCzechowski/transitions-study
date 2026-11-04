@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent, type Ref } from 'react';
 import type { PresetConfig } from '../config/transitions.config';
 import { nextGalleryIndex } from '../model/galleryNav';
 import { lastInputWasKeyboard } from './hooks';
@@ -10,23 +10,27 @@ interface Props {
   previewId: string | null;
   /** When set, presets are shown but cannot be previewed or applied. */
   disabledReason: string | null;
-  /** Horizontal position of the cut, in % of the timeline width. */
-  anchorPct: number;
+  /** The listbox; the editor focuses its current tab stop from + at the cut. */
+  listRef: Ref<HTMLDivElement>;
+  /** Id for the listbox, so the cut handle can point at it. */
+  listId: string;
   reducedMotion: boolean;
   previewActive: boolean;
   previewPlaying: boolean;
   onPreview: (id: string) => void;
   onLeave: () => void;
   onApply: (id: string) => void;
-  onClose: () => void;
+  onEscape: () => void;
   onTogglePreview: () => void;
+  /** Pointer over the picker or focus inside it. */
+  onActiveChange: (active: boolean) => void;
 }
 
 /**
- * Preset gallery. Roving focus: one tab stop, arrow keys move and preview,
- * Enter applies, Esc closes, Space plays/pauses the preview. Previews revert
- * only when the pointer leaves the whole gallery or focus moves outside it,
- * so moving between tiles never flashes the timeline state.
+ * Level-1 preset picker in the sidebar. Roving focus: one tab stop, arrow keys
+ * move and preview, Enter applies, Esc goes back, Space plays/pauses the
+ * preview. Previews revert only when the pointer leaves the whole picker or
+ * focus moves outside it, so moving between tiles never flashes the timeline.
  */
 export function Gallery(props: Props) {
   const { presets, appliedId, previewId, disabledReason, reducedMotion, previewActive, previewPlaying } = props;
@@ -37,11 +41,24 @@ export function Gallery(props: Props) {
   const hintId = useId();
   const noticeId = useId();
   const disabled = disabledReason !== null;
+  const active = useRef({ pointer: false, focus: false });
 
-  useEffect(() => {
-    // Focus once, on open.
-    items.current[initial]?.focus({ preventScroll: true });
-  }, []);
+  const setActive = (part: 'pointer' | 'focus', value: boolean) => {
+    const before = active.current.pointer || active.current.focus;
+    active.current = { ...active.current, [part]: value };
+    const after = active.current.pointer || active.current.focus;
+    if (before !== after) props.onActiveChange(after);
+  };
+
+  // Unmounting (apply → level 2) never fires leave/blur, so report inactive here.
+  const onActiveChange = useRef(props.onActiveChange);
+  onActiveChange.current = props.onActiveChange;
+  useEffect(
+    () => () => {
+      if (active.current.pointer || active.current.focus) onActiveChange.current(false);
+    },
+    [],
+  );
 
   const focusItem = (i: number) => {
     setFocusIndex(i);
@@ -67,7 +84,7 @@ export function Gallery(props: Props) {
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      props.onClose();
+      props.onEscape();
     } else if (e.key === ' ' && !e.repeat) {
       e.preventDefault();
       e.stopPropagation();
@@ -76,7 +93,9 @@ export function Gallery(props: Props) {
   };
 
   const onBlur = (e: FocusEvent) => {
-    if (!rootRef.current?.contains(e.relatedTarget as Node | null)) props.onLeave();
+    if (rootRef.current?.contains(e.relatedTarget as Node | null)) return;
+    setActive('focus', false);
+    props.onLeave();
   };
 
   const previewName = presets.find((p) => p.id === previewId)?.name;
@@ -87,19 +106,26 @@ export function Gallery(props: Props) {
       ref={rootRef}
       className="gallery"
       role="group"
-      aria-label="Transitions"
-      style={{ '--anchor': `${props.anchorPct}%` } as CSSProperties}
-      onPointerLeave={props.onLeave}
+      aria-label="Transition picker"
+      onPointerEnter={() => setActive('pointer', true)}
+      onPointerLeave={() => {
+        setActive('pointer', false);
+        props.onLeave();
+      }}
+      onFocus={() => setActive('focus', true)}
       onBlur={onBlur}
       onKeyDown={onRootKeyDown}
     >
-      <div className="gallery-head">
-        <span className="gallery-title">Transitions</span>
-        <span className="gallery-status" aria-live="polite">
-          {disabled ? '' : previewName ? `Previewing ${previewName}` : reducedMotion ? 'Focus a preset to see it at the cut' : 'Hover a preset to preview it'}
-        </span>
-        <span className="spacer" />
-        {!disabled && (
+      {disabled ? (
+        <p className="notice" id={noticeId} role="note">
+          {disabledReason}
+        </p>
+      ) : (
+        <div className="gallery-head">
+          <span className="gallery-status" aria-live="polite">
+            {previewName ? `Previewing ${previewName}` : reducedMotion ? 'Focus a preset to see it at the cut' : 'Hover a preset to preview it'}
+          </span>
+          <span className="spacer" />
           <button
             type="button"
             className="btn btn-small"
@@ -109,21 +135,14 @@ export function Gallery(props: Props) {
           >
             {playLabel}
           </button>
-        )}
-        <button type="button" className="btn btn-small btn-quiet" onClick={props.onClose} aria-label="Close transitions" aria-keyshortcuts="Escape">
-          ✕
-        </button>
-      </div>
-      {disabled && (
-        <p className="notice" id={noticeId} role="note">
-          {disabledReason}
-        </p>
+        </div>
       )}
       <div
+        ref={props.listRef}
+        id={props.listId}
         className="gallery-list"
         role="listbox"
         aria-label="Transition presets"
-        aria-orientation="horizontal"
         aria-describedby={disabled ? `${noticeId} ${hintId}` : hintId}
         onKeyDown={onKeyDown}
       >
@@ -145,14 +164,17 @@ export function Gallery(props: Props) {
             }}
             onClick={() => props.onApply(p.id)}
           >
-            <PresetIcon id={p.id} />
+            <span className="preset-thumb">
+              <PresetIcon id={p.id} />
+              {appliedId === p.id && <span className="preset-badge">Applied</span>}
+            </span>
             <span className="preset-name">{p.name}</span>
-            <span className="preset-hint">{appliedId === p.id ? 'Applied' : p.hint}</span>
+            <span className="preset-hint">{p.hint}</span>
           </div>
         ))}
       </div>
       <p className="gallery-keys muted" id={hintId}>
-        ←→ move and preview · Enter apply · Space play/pause · Esc close
+        Arrows move and preview · Enter apply · Space play/pause · Esc back
       </p>
     </div>
   );

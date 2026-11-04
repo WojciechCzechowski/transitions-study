@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { getPreset, PRESETS, TRANSITION_DEFAULTS } from '../config/transitions.config';
 import { feelToParams } from '../model/feel';
 import {
@@ -16,14 +17,16 @@ import {
   updateGesture,
   type History,
 } from '../model/history';
+import { sidebarView } from '../model/layout';
 import { describeLimit, describeNoHandles } from '../model/messages';
 import { applyTransition, removeTransition, setDuration, setFeel } from '../model/ops';
-import { cutFrame, docEquals, getLimits, timelineLength, type Doc, type Transition } from '../model/timeline';
+import { docEquals, getLimits, type Doc, type Transition } from '../model/timeline';
 import { formatDuration, formatTimecode, type Frames } from '../model/time';
 import type { FrameInfo, PreviewCandidate, PreviewController } from '../playback/PreviewController';
 import { Gallery } from './Gallery';
 import { Inspector } from './Inspector';
 import { Timeline } from './Timeline';
+import { TransitionsPanel } from './TransitionsPanel';
 
 interface Props {
   baseDoc: Doc;
@@ -31,6 +34,9 @@ interface Props {
   ready: boolean;
   reducedMotion: boolean;
   announce: (text: string) => void;
+  /** Shell slots this editor renders into. */
+  sidebarEl: HTMLElement;
+  timelineEl: HTMLElement;
 }
 
 const pad3 = (n: number) => String(n).padStart(3, '0');
@@ -52,9 +58,10 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 
 /**
  * Owns the undoable document and the interaction state for one scenario.
- * Remounted (via key) when the scenario changes, which resets history.
+ * Remounted (via key) when the scenario changes, which resets history. Renders
+ * the Transitions sidebar and the timeline pane into the shell's slots.
  */
-export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: Props) {
+export function Editor({ baseDoc, controller, ready, reducedMotion, announce, sidebarEl, timelineEl }: Props) {
   const [history, setHistory] = useState<History<Doc>>(() => createHistory(baseDoc));
   const doc = history.present;
   const limits = useMemo(() => getLimits(doc), [doc]);
@@ -62,7 +69,10 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
   const [playhead, setPlayhead] = useState<Frames>(0);
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState(false);
-  const [galleryOpen, setGalleryOpen] = useState(false);
+  /** Level 1 opened from level 2 to swap the applied preset. */
+  const [changing, setChanging] = useState(false);
+  const [pickerActive, setPickerActive] = useState(false);
+  const [, setFocusTick] = useState(0);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [preview, setPreview] = useState({ active: false, playing: false });
   const [looping, setLooping] = useState(false);
@@ -70,7 +80,12 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
   const readoutRef = useRef<HTMLOutputElement>(null);
   const cutHandleRef = useRef<HTMLButtonElement>(null);
   const transitionRef = useRef<HTMLButtonElement>(null);
-  const pendingFocus = useRef<'transition' | 'cut' | null>(null);
+  const pickerListRef = useRef<HTMLDivElement>(null);
+  const editHeadingRef = useRef<HTMLHeadingElement>(null);
+  const changeRef = useRef<HTMLButtonElement>(null);
+  const pendingFocus = useRef<'transition' | 'cut' | 'picker' | 'edit' | 'change' | null>(null);
+  const pickerId = useId();
+  const view = sidebarView({ hasTransition: !!doc.transition, selected, changing });
   const feelGesture = useRef(false);
 
   // --- controller wiring -------------------------------------------------------
@@ -116,8 +131,15 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
   // --- derived behaviour on document changes --------------------------------
 
   useEffect(() => {
-    if (!doc.transition) setSelected(false);
+    if (doc.transition) return;
+    setSelected(false);
+    setChanging(false);
   }, [doc.transition]);
+
+  // The loop control lives in level 2; leaving it stops the loop.
+  useEffect(() => {
+    if (view === 'pick' && looping) controller.endPreview();
+  }, [controller, view, looping]);
 
   // Keep the applied-transition loop in sync with Feel / duration edits.
   useEffect(() => {
@@ -134,7 +156,11 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
     const target = pendingFocus.current;
     if (!target) return;
     pendingFocus.current = null;
-    (target === 'transition' ? transitionRef : cutHandleRef).current?.focus({ preventScroll: true });
+    const el =
+      target === 'picker'
+        ? pickerListRef.current?.querySelector<HTMLElement>('[tabindex="0"]')
+        : { transition: transitionRef, cut: cutHandleRef, edit: editHeadingRef, change: changeRef }[target].current;
+    el?.focus({ preventScroll: true });
   });
 
   // --- actions ---------------------------------------------------------------
@@ -149,19 +175,43 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
     [doc.transition, limits],
   );
 
-  const openGallery = () => {
+  const requestFocus = (target: NonNullable<typeof pendingFocus.current>) => {
+    pendingFocus.current = target;
+    setFocusTick((n) => n + 1);
+  };
+
+  /** Selection drives the sidebar level; any selection change ends a swap. */
+  const select = useCallback((value: boolean) => {
+    setSelected(value);
+    setChanging(false);
+  }, []);
+
+  /** + at the cut: move into the level-1 picker. */
+  const chooseAtCut = () => {
     if (!ready) return;
-    controller.endPreview();
     controller.pause();
-    setGalleryOpen(true);
+    requestFocus('picker');
     if (!limits.canTransition) announce(describeNoHandles(doc, limits));
   };
 
-  const closeGallery = (moveFocus: boolean) => {
+  /** Level 2 → level 1 to swap the applied preset. */
+  const startChange = () => {
+    controller.endPreview();
+    controller.pause();
+    setChanging(true);
+    requestFocus('picker');
+  };
+
+  /** Esc from the picker (or globally while swapping). */
+  const leavePicker = () => {
     controller.endPreview();
     setPreviewId(null);
-    setGalleryOpen(false);
-    if (moveFocus) pendingFocus.current = doc.transition ? 'transition' : 'cut';
+    if (changing) {
+      setChanging(false);
+      requestFocus('change');
+    } else {
+      requestFocus(doc.transition ? 'transition' : 'cut');
+    }
   };
 
   const onPreview = (id: string) => {
@@ -185,12 +235,13 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
     if (r.doc !== doc) commitDoc(r.doc, r.replaced ? `Change to ${preset.name}` : `Apply ${preset.name}`);
     controller.endPreview();
     setPreviewId(null);
-    setGalleryOpen(false);
-    setSelected(true);
-    pendingFocus.current = 'transition';
+    select(true);
+    requestFocus('edit');
     const t = r.doc.transition!;
     const capped = r.clamped === 'max' ? ` ${describeLimit(r.doc, getLimits(r.doc))}.` : '';
-    announce(`${preset.name} applied: ${formatDuration(t.duration)}, centred on the cut.${capped}`);
+    if (r.doc === doc) announce(`${preset.name} selected`);
+    else if (r.replaced) announce(`Changed to ${preset.name}: ${formatDuration(t.duration)}, Feel kept.${capped}`);
+    else announce(`${preset.name} applied: ${formatDuration(t.duration)}, centred on the cut.${capped}`);
   };
 
   const removeCurrent = () => {
@@ -199,8 +250,8 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
     const name = getPreset(t.presetId).name;
     controller.endPreview();
     commitDoc(removeTransition(doc), `Remove ${name}`);
-    setSelected(false);
-    pendingFocus.current = 'cut';
+    select(false);
+    requestFocus('cut');
     announce(`${name} removed`);
   };
 
@@ -258,9 +309,9 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
 
   // --- global shortcuts --------------------------------------------------------
 
-  const latest = useRef({ doUndo, doRedo, togglePlay, removeCurrent, closeGallery, selected, galleryOpen, looping, hasTransition: !!doc.transition });
+  const latest = useRef({ doUndo, doRedo, togglePlay, removeCurrent, leavePicker, select, selected, changing, looping, hasTransition: !!doc.transition });
   useLayoutEffect(() => {
-    latest.current = { doUndo, doRedo, togglePlay, removeCurrent, closeGallery, selected, galleryOpen, looping, hasTransition: !!doc.transition };
+    latest.current = { doUndo, doRedo, togglePlay, removeCurrent, leavePicker, select, selected, changing, looping, hasTransition: !!doc.transition };
   });
 
   useEffect(() => {
@@ -294,39 +345,107 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
         e.preventDefault();
         s.removeCurrent();
       } else if (e.key === 'Escape') {
-        if (s.galleryOpen) s.closeGallery(true);
+        if (s.changing) s.leavePicker();
         else if (s.looping) controller.endPreview();
-        else if (s.selected) setSelected(false);
+        else if (s.selected) s.select(false);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [controller]);
 
-  // Clicking outside the gallery closes it (without moving focus).
-  useEffect(() => {
-    if (!galleryOpen) return;
-    const onDown = (e: PointerEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el?.closest('.gallery, .cut-handle, .preview')) return;
-      latest.current.closeGallery(false);
-    };
-    window.addEventListener('pointerdown', onDown, true);
-    return () => window.removeEventListener('pointerdown', onDown, true);
-  }, [galleryOpen]);
-
   // --- render ----------------------------------------------------------------
 
   const t: Transition | null = doc.transition;
-  const len = timelineLength(doc);
-  const anchorPct = (100 * cutFrame(doc)) / len;
+  const presetName = t ? getPreset(t.presetId).name : null;
+  const mod = isMac ? '⌘' : 'Ctrl';
 
-  return (
+  const sidebar = (
+    <TransitionsPanel
+      view={view}
+      presetName={presetName}
+      changing={changing}
+      editHeadingRef={editHeadingRef}
+      onChange={startChange}
+      onBack={leavePicker}
+      footer={
+        <p className="shortcuts muted">
+          <kbd>Space</kbd> play/pause · <kbd>{mod}</kbd>
+          <kbd>Z</kbd> undo · <kbd>⇧</kbd>
+          <kbd>{mod}</kbd>
+          <kbd>Z</kbd> redo · <kbd>Delete</kbd> removes the selected transition · drag the ruler to scrub (←→ steps frames)
+        </p>
+      }
+    >
+      {view === 'edit' && t ? (
+        <Inspector
+          doc={doc}
+          transition={t}
+          limits={limits}
+          looping={looping}
+          changeRef={changeRef}
+          onFeelPointerDown={onFeelPointerDown}
+          onFeelInput={onFeelInput}
+          onChangePreset={startChange}
+          onRemove={removeCurrent}
+          onToggleLoop={() => (looping ? controller.endPreview() : setLooping(true))}
+        />
+      ) : (
+        <Gallery
+          presets={PRESETS}
+          appliedId={t?.presetId ?? null}
+          previewId={previewId}
+          disabledReason={limits.canTransition ? null : describeNoHandles(doc, limits)}
+          listRef={pickerListRef}
+          listId={pickerId}
+          reducedMotion={reducedMotion}
+          previewActive={preview.active}
+          previewPlaying={preview.playing}
+          onPreview={onPreview}
+          onLeave={onLeavePreview}
+          onApply={onApply}
+          onEscape={leavePicker}
+          onTogglePreview={() => controller.togglePreviewPlayback()}
+          onActiveChange={setPickerActive}
+        />
+      )}
+    </TransitionsPanel>
+  );
+
+  const timeline = (
     <>
-      <div className="transport">
+      <div className="timeline-bar">
+        <div className="bar-left">
+          <span className="timecode">
+            {formatTimecode(playhead)} <span className="muted">f{playhead}</span>
+          </span>
+          <span className="bar-divider" aria-hidden="true" />
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={doUndo}
+            disabled={!canUndo(history)}
+            aria-label={canUndo(history) ? `Undo ${undoLabel(history)}` : 'Undo'}
+            title={canUndo(history) ? `Undo ${undoLabel(history)} (${mod}Z)` : 'Nothing to undo'}
+            aria-keyshortcuts={isMac ? 'Meta+Z' : 'Control+Z'}
+          >
+            <span aria-hidden="true">↶</span>
+          </button>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={doRedo}
+            disabled={!canRedo(history)}
+            aria-label={canRedo(history) ? `Redo ${redoLabel(history)}` : 'Redo'}
+            title={canRedo(history) ? `Redo ${redoLabel(history)} (⇧${mod}Z)` : 'Nothing to redo'}
+            aria-keyshortcuts={isMac ? 'Shift+Meta+Z' : 'Shift+Control+Z'}
+          >
+            <span aria-hidden="true">↷</span>
+          </button>
+        </div>
         <button
           type="button"
-          className="btn play"
+          className="btn-play"
           onClick={() => controller.togglePlay()}
           aria-label={playing ? 'Pause' : 'Play'}
           aria-keyshortcuts="Space"
@@ -334,55 +453,10 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
         >
           <span aria-hidden="true">{playing ? '❚❚' : '▶'}</span>
         </button>
-        <span className="timecode">
-          {formatTimecode(playhead)} <span className="muted">f{playhead}</span>
-        </span>
-        <output ref={readoutRef} className="frame-readout" />
-        <span className="spacer" />
-        {reducedMotion && <span className="badge">Reduced motion: previews play on request</span>}
-      </div>
-
-      <div className="panel">
-        {galleryOpen ? (
-          <Gallery
-            presets={PRESETS}
-            appliedId={t?.presetId ?? null}
-            previewId={previewId}
-            disabledReason={limits.canTransition ? null : describeNoHandles(doc, limits)}
-            anchorPct={anchorPct}
-            reducedMotion={reducedMotion}
-            previewActive={preview.active}
-            previewPlaying={preview.playing}
-            onPreview={onPreview}
-            onLeave={onLeavePreview}
-            onApply={onApply}
-            onClose={() => closeGallery(true)}
-            onTogglePreview={() => controller.togglePreviewPlayback()}
-          />
-        ) : t ? (
-          <Inspector
-            doc={doc}
-            transition={t}
-            limits={limits}
-            looping={looping}
-            onFeelPointerDown={onFeelPointerDown}
-            onFeelInput={onFeelInput}
-            onChangePreset={openGallery}
-            onRemove={removeCurrent}
-            onToggleLoop={() => (looping ? controller.endPreview() : setLooping(true))}
-          />
-        ) : (
-          <div className="hint">
-            <p>
-              Hover the cut between the clips and click <kbd>+</kbd> to add a transition. Tab to it with the keyboard.
-            </p>
-            {!limits.canTransition && (
-              <p className="notice" role="note">
-                {describeNoHandles(doc, limits)}
-              </p>
-            )}
-          </div>
-        )}
+        <div className="bar-right">
+          {reducedMotion && <span className="badge">Reduced motion: previews play on request</span>}
+          <output ref={readoutRef} className="frame-readout" />
+        </div>
       </div>
 
       <Timeline
@@ -391,24 +465,25 @@ export function Editor({ baseDoc, controller, ready, reducedMotion, announce }: 
         playhead={playhead}
         ready={ready}
         selected={selected}
-        galleryOpen={galleryOpen}
+        pickerActive={view === 'pick' && (pickerActive || preview.active)}
+        pickerId={pickerId}
         cutHandleRef={cutHandleRef}
         transitionRef={transitionRef}
         onScrubStart={onScrubStart}
         onScrub={setPlayhead}
-        onSelect={setSelected}
-        onOpenGallery={() => (galleryOpen ? closeGallery(true) : openGallery())}
+        onSelect={select}
+        onChooseAtCut={chooseAtCut}
         gesture={gesture}
         onStepDuration={onStepDuration}
         announce={announce}
       />
+    </>
+  );
 
-      <p className="shortcuts muted">
-        <kbd>Space</kbd> play/pause · drag the ruler to scrub (←→ steps frames) · <kbd>{isMac ? '⌘' : 'Ctrl'}</kbd>
-        <kbd>Z</kbd> undo · <kbd>⇧</kbd>
-        <kbd>{isMac ? '⌘' : 'Ctrl'}</kbd>
-        <kbd>Z</kbd> redo · <kbd>Delete</kbd> removes the selected transition
-      </p>
+  return (
+    <>
+      {createPortal(sidebar, sidebarEl)}
+      {createPortal(timeline, timelineEl)}
     </>
   );
 }

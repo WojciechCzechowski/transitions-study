@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type Ref } from 'react';
 import { getPreset } from '../config/transitions.config';
 import { formatBezier, type Bezier } from '../model/easing';
 import { feelToParams } from '../model/feel';
@@ -16,10 +16,15 @@ interface Props {
   onChangePreset: () => void;
   onRemove: () => void;
   onToggleLoop: () => void;
+  /** The Change transition button, for focus return from the picker. */
+  changeRef: Ref<HTMLButtonElement>;
 }
 
-/** Selected-transition controls: duration readout, the Feel slider and actions. */
-export function Inspector({ doc, transition, limits, looping, ...on }: Props) {
+/**
+ * Level-2 sidebar view for the selected transition: duration readout, the Feel
+ * slider and actions. The preset name is the panel's breadcrumb heading.
+ */
+export function Inspector({ doc, transition, limits, looping, changeRef, ...on }: Props) {
   const preset = getPreset(transition.presetId);
   const params = feelToParams(transition.feel, preset.feel, limits);
   const feelId = useId();
@@ -30,21 +35,20 @@ export function Inspector({ doc, transition, limits, looping, ...on }: Props) {
   const manual = transition.duration !== params.duration;
 
   return (
-    <section className="inspector" aria-label="Transition settings">
-      <div className="inspector-col">
-        <h2 className="inspector-title">{preset.name}</h2>
-        <p className="muted">Centred on the cut</p>
-        <dl className="readout">
-          <dt>Duration</dt>
-          <dd>
-            {formatDuration(transition.duration)}
-            <span className="muted"> · max {limits.max} f</span>
-            {manual && <span className="muted"> · set by drag</span>}
-          </dd>
-        </dl>
-      </div>
+    <div className="inspector">
+      <dl className="readout">
+        <dt>Duration</dt>
+        <dd>
+          {formatDuration(transition.duration)}
+          {manual && <span className="muted"> · set by drag</span>}
+        </dd>
+        <dt>Maximum</dt>
+        <dd>{limits.max} f</dd>
+        <dt>Position</dt>
+        <dd>Centred on the cut</dd>
+      </dl>
 
-      <div className="inspector-col feel">
+      <div className="inspector-group">
         <label htmlFor={feelId} className="feel-label">
           Feel <span className="muted">{transition.feel}</span>
         </label>
@@ -79,18 +83,18 @@ export function Inspector({ doc, transition, limits, looping, ...on }: Props) {
         )}
       </div>
 
-      <div className="inspector-col actions">
+      <div className="inspector-actions">
         <button type="button" className="btn" aria-pressed={looping} onClick={on.onToggleLoop}>
           {looping ? 'Stop preview' : 'Preview loop'}
         </button>
-        <button type="button" className="btn" onClick={on.onChangePreset}>
-          Change preset…
+        <button ref={changeRef} type="button" className="btn" onClick={on.onChangePreset}>
+          Change transition
         </button>
         <button type="button" className="btn btn-danger" onClick={on.onRemove} aria-keyshortcuts="Delete">
           Remove
         </button>
       </div>
-    </section>
+    </div>
   );
 }
 

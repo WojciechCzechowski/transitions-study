@@ -27,6 +27,9 @@ npm run clips:normalize -- path/to/a.mov path/to/b.mov --start 2
 | Frame-accurate pre-decode to ImageBitmaps | `src/media/decoder.ts` |
 | WebGL2 renderer and one shader per transition | `src/render/` |
 | Single rAF loop for playback and previews | `src/playback/PreviewController.ts` |
+| Workspace shell: top bar, resizable sidebar / preview / timeline | `src/ui/Shell.tsx`, `src/ui/Splitter.tsx` |
+| Pane size limits, splitter keys, sidebar level | `src/model/layout.ts` |
+| Transitions sidebar: level 1 picker, level 2 editor | `src/ui/TransitionsPanel.tsx`, `src/ui/Gallery.tsx`, `src/ui/Inspector.tsx` |
 
 All model times are integer frames at 30 fps. Transitions are centred on the cut and always an even number of frames long.
 

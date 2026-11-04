@@ -12,6 +12,7 @@ import { PreviewController } from './playback/PreviewController';
 import { Editor } from './ui/Editor';
 import { installModalityTracking, useAnnouncer, useReducedMotion } from './ui/hooks';
 import { Preview, type LoadState } from './ui/Preview';
+import { Shell } from './ui/Shell';
 
 function toStudyError(e: unknown): StudyError {
   if (e instanceof StudyError) return e;
@@ -28,6 +29,8 @@ export function App() {
   const [load, setLoad] = useState<LoadState>({ status: 'loading', phase: 'manifest', done: 0, total: 0 });
   const [attempt, setAttempt] = useState(0);
   const hostRef = useRef<HTMLDivElement>(null);
+  const [sidebarEl, setSidebarEl] = useState<HTMLDivElement | null>(null);
+  const [timelineEl, setTimelineEl] = useState<HTMLElement | null>(null);
   const [message, announce] = useAnnouncer();
 
   useEffect(() => installModalityTracking(), []);
@@ -139,43 +142,55 @@ export function App() {
     };
   }, [manifest, docResult, scenario.label, controller, store]);
 
-  return (
-    <div className="app">
-      <header className="app-header">
-        <div>
-          <h1>Transition study</h1>
-          <p className="muted">Unofficial interaction study: two clips, one cut, one transition.</p>
-        </div>
-        <label className="scenario">
-          <span className="muted">Handles</span>
-          <select value={scenarioId} onChange={(e) => setScenarioId(e.currentTarget.value)}>
-            {SCENARIOS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </header>
+  const header = (
+    <>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <span className="crumb-root">Transition study</span>
+        <span className="crumb-sep" aria-hidden="true">/</span>
+        <span className="crumb-current" aria-current="page">
+          {scenario.label}
+        </span>
+      </nav>
+      <span className="spacer" />
+      <span className="topbar-note muted">Unofficial interaction study</span>
+      <label className="scenario">
+        <span className="muted">Handles</span>
+        <select value={scenarioId} onChange={(e) => setScenarioId(e.currentTarget.value)}>
+          {SCENARIOS.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
 
-      <main className="workspace">
-        <Preview controller={controller} load={load} onRetry={() => setAttempt((a) => a + 1)} />
-        {docResult?.ok && (
-          <Editor
-            key={`${scenarioId}:${manifestVersion}`}
-            baseDoc={docResult.doc}
-            controller={controller}
-            ready={load.status === 'ready'}
-            reducedMotion={reducedMotion}
-            announce={announce}
-          />
-        )}
-      </main>
+  return (
+    <>
+      <Shell
+        header={header}
+        preview={<Preview controller={controller} load={load} onRetry={() => setAttempt((a) => a + 1)} />}
+        sidebarRef={setSidebarEl}
+        timelineRef={setTimelineEl}
+      />
+      {docResult?.ok && sidebarEl && timelineEl && (
+        <Editor
+          key={`${scenarioId}:${manifestVersion}`}
+          baseDoc={docResult.doc}
+          controller={controller}
+          ready={load.status === 'ready'}
+          reducedMotion={reducedMotion}
+          announce={announce}
+          sidebarEl={sidebarEl}
+          timelineEl={timelineEl}
+        />
+      )}
 
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         <span key={message.n}>{message.text}</span>
       </div>
       <div ref={hostRef} className="decode-host" aria-hidden="true" />
-    </div>
+    </>
   );
 }

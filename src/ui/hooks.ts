@@ -50,6 +50,28 @@ export function useElementWidth<T extends HTMLElement>(): [RefCallback<T>, numbe
   return [ref, width];
 }
 
+/** Content-box size of an element, tracked with ResizeObserver. */
+export function useElementSize<T extends HTMLElement>(): [RefCallback<T>, { width: number; height: number }] {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: T | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el) return;
+    const update = (width: number, height: number) =>
+      setSize((s) => (s.width === width && s.height === height ? s : { width, height }));
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box) update(box.width, box.height);
+    });
+    ro.observe(el);
+    observer.current = ro;
+    const rect = el.getBoundingClientRect();
+    update(rect.width, rect.height);
+  }, []);
+  return [ref, size];
+}
+
 /** Polite live-region announcements; repeating the same text still re-announces. */
 export function useAnnouncer() {
   const [message, setMessage] = useState({ text: '', n: 0 });

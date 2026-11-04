@@ -21,13 +21,16 @@ interface Props {
   playhead: Frames;
   ready: boolean;
   selected: boolean;
-  galleryOpen: boolean;
+  /** The level-1 picker is hovered or focused, or a preview is running. */
+  pickerActive: boolean;
+  /** Id of the picker list the cut handle moves focus into. */
+  pickerId: string;
   cutHandleRef: Ref<HTMLButtonElement>;
   transitionRef: Ref<HTMLButtonElement>;
   onScrubStart: () => void;
   onScrub: (frame: Frames) => void;
   onSelect: (selected: boolean) => void;
-  onOpenGallery: () => void;
+  onChooseAtCut: () => void;
   gesture: {
     begin: () => void;
     update: (doc: Doc) => void;
@@ -49,7 +52,7 @@ interface DragState {
 }
 
 export function Timeline(props: Props) {
-  const { doc, limits, playhead, ready, selected, galleryOpen } = props;
+  const { doc, limits, playhead, ready, selected, pickerActive } = props;
   const [innerRef, width] = useElementWidth<HTMLDivElement>();
   const len = timelineLength(doc);
   const ppf = width > 0 ? width / len : 0;
@@ -69,7 +72,7 @@ export function Timeline(props: Props) {
   });
 
   const t = doc.transition;
-  const showHandles = hoverCut || cutFocused || galleryOpen || dragEdge !== null || edgeFocused !== null;
+  const showHandles = hoverCut || cutFocused || pickerActive || dragEdge !== null || edgeFocused !== null;
 
   // Escape cancels an edge drag and restores the duration from before it.
   useEffect(() => {
@@ -197,6 +200,10 @@ export function Timeline(props: Props) {
 
   return (
     <div className="timeline">
+      <div className="track-headers" aria-hidden="true">
+        <div className="track-header-ruler">{formatTimecode(playhead)}</div>
+        <div className="track-header">V1</div>
+      </div>
       <div className="timeline-inner" ref={innerRef}>
         <div
           className="ruler"
@@ -223,6 +230,8 @@ export function Timeline(props: Props) {
 
         <div
           className="track"
+          role="group"
+          aria-label="Video track V1"
           onPointerDown={(e) => {
             const el = e.target as HTMLElement;
             if (el === e.currentTarget || el.closest('.clip')) props.onSelect(false);
@@ -256,7 +265,7 @@ export function Timeline(props: Props) {
 
               {!t && (
                 <div
-                  className="cut-zone"
+                  className={`cut-zone${pickerActive ? ' engaged' : ''}`}
                   style={{ left: x(cut) }}
                   onPointerEnter={() => setHoverCut(true)}
                   onPointerLeave={() => setHoverCut(false)}
@@ -265,12 +274,12 @@ export function Timeline(props: Props) {
                     ref={props.cutHandleRef}
                     type="button"
                     className="cut-handle"
-                    aria-label={ready ? 'Add transition at the cut' : 'Add transition at the cut (preparing frames)'}
-                    aria-expanded={galleryOpen}
+                    aria-label={ready ? 'Choose a transition for the cut' : 'Choose a transition for the cut (preparing frames)'}
+                    aria-controls={props.pickerId}
                     aria-disabled={!ready || undefined}
                     onFocus={() => setCutFocused(true)}
                     onBlur={() => setCutFocused(false)}
-                    onClick={() => ready && props.onOpenGallery()}
+                    onClick={() => ready && props.onChooseAtCut()}
                   >
                     <span aria-hidden="true">+</span>
                   </button>
