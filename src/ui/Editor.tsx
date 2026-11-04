@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Minus, MoveHorizontal, Plus, Redo2, SquareSplitHorizontal, Undo2 } from 'lucide-react';
+import { Minus, Pause, Play, Plus, Redo2, Scan, SquareSplitHorizontal, Undo2 } from 'lucide-react';
 import { LIBRARY_INSERT } from '../config/study.config';
 import { getPreset, PRESETS, TRANSITION_DEFAULTS } from '../config/transitions.config';
 import type { FrameStore } from '../media/FrameStore';
@@ -821,7 +821,8 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
             onClick={doUndo}
             disabled={!canUndo(history)}
             aria-label={canUndo(history) ? `Undo ${undoLabel(history)}` : 'Undo'}
-            title={canUndo(history) ? `Undo ${undoLabel(history)} (${mod}Z)` : 'Nothing to undo'}
+            data-tip={canUndo(history) ? `Undo ${undoLabel(history)}` : 'Nothing to undo'}
+            data-keys={canUndo(history) ? `${mod} Z` : undefined}
             aria-keyshortcuts={isMac ? 'Meta+Z' : 'Control+Z'}
           >
             <Undo2 size={ICON} aria-hidden="true" />
@@ -832,7 +833,8 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
             onClick={doRedo}
             disabled={!canRedo(history)}
             aria-label={canRedo(history) ? `Redo ${redoLabel(history)}` : 'Redo'}
-            title={canRedo(history) ? `Redo ${redoLabel(history)} (⇧${mod}Z)` : 'Nothing to redo'}
+            data-tip={canRedo(history) ? `Redo ${redoLabel(history)}` : 'Nothing to redo'}
+            data-keys={canRedo(history) ? `⇧ ${mod} Z` : undefined}
             aria-keyshortcuts={isMac ? 'Shift+Meta+Z' : 'Shift+Control+Z'}
           >
             <Redo2 size={ICON} aria-hidden="true" />
@@ -843,7 +845,8 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
             onClick={doSplit}
             disabled={!ready || !splitCheck.ok}
             aria-label={splitReason ? `Split at playhead (${splitReason})` : 'Split at playhead'}
-            title={splitReason ?? 'Split the clip at the playhead (S)'}
+            data-tip={splitReason ?? 'Split'}
+            data-keys={splitReason ? undefined : 'S'}
             aria-keyshortcuts="S"
           >
             <SquareSplitHorizontal size={ICON} aria-hidden="true" />
@@ -857,14 +860,14 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
           aria-keyshortcuts="Space"
           disabled={!ready}
         >
-          <span aria-hidden="true">{playing ? '❚❚' : '▶'}</span>
+          <span aria-hidden="true">{playing ? <Pause size={SMALL_ICON}/> : <Play size={SMALL_ICON}/>}</span>
         </button>
         <div className="bar-right">
           {reducedMotion && <span className="badge">Reduced motion: previews play on request</span>}
           <output ref={readoutRef} className="frame-readout" />
           <span className="bar-divider" aria-hidden="true" />
           <div className="zoom" role="group" aria-label="Timeline zoom">
-            <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf / 1.25))} aria-label="Zoom out" title="Zoom out">
+            <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf / 1.25))} aria-label="Zoom out" data-tip="Zoom out">
               <Minus size={SMALL_ICON} aria-hidden="true" />
             </button>
             <input
@@ -873,22 +876,22 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
               max={100}
               step={1}
               value={zoomSlider}
+              style={{ '--t': zoomSlider / 100 } as CSSProperties}
               aria-label="Zoom"
               aria-valuetext={`${ppf.toFixed(2)} pixels per frame${zoom === null ? ', fit to width' : ''}`}
               onChange={(e) => setZoom(sliderToZoom(Number(e.currentTarget.value)))}
             />
-            <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf * 1.25))} aria-label="Zoom in" title="Zoom in">
+            <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf * 1.25))} aria-label="Zoom in" data-tip="Zoom in">
               <Plus size={SMALL_ICON} aria-hidden="true" />
             </button>
             <button
               type="button"
               className="btn-icon zoom-fit"
-              onClick={() => setZoom(null)}
-              aria-pressed={zoom === null}
-              aria-label="Fit to width"
-              title="Fit the timeline to the width"
+              onClick={() => setZoom(fitScale(len, viewportWidth))}
+              aria-label="Zoom to fit"
+              data-tip="Zoom to fit"
             >
-              <MoveHorizontal size={ICON} aria-hidden="true" />
+              <Scan size={ICON} aria-hidden="true" />
             </button>
           </div>
         </div>

@@ -13,6 +13,7 @@ import { installModalityTracking, useAnnouncer, useReducedMotion } from './ui/ho
 import { Preview, type LoadState } from './ui/Preview';
 import { Shell } from './ui/Shell';
 import { ShortcutsDialog } from './ui/ShortcutsDialog';
+import { TooltipLayer } from './ui/Tooltip';
 
 function toStudyError(e: unknown): StudyError {
   if (e instanceof StudyError) return e;
@@ -157,6 +158,7 @@ export function App() {
       <span className="spacer" />
       <span className="topbar-note muted">Unofficial interaction study</span>
       <ShortcutsDialog />
+      <TooltipLayer />
     </>
   );
 

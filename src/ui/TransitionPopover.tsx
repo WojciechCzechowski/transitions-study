@@ -158,7 +158,7 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
             aria-controls={fineTuneOpen ? tuneId : undefined}
             onClick={on.onFineTuneToggle}
             aria-label="Fine-tune"
-            title="Fine-tune"
+            data-tip="Fine-tune"
           >
             <SlidersHorizontal size={16} aria-hidden="true" />
           </button>
@@ -189,8 +189,8 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
                         type="button"
                         aria-pressed={picked}
                         className={`curve${picked ? ' on' : ''}`}
-                        title={c.name}
                         aria-label={c.name}
+                        data-tip={c.name}
                         onClick={() => on.onEasingPick(c.bezier)}
                       >
                         <CurveGlyph bezier={c.bezier} />
@@ -219,7 +219,8 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
             aria-pressed={looping}
             onClick={on.onToggleLoop}
             aria-label="Preview loop"
-            title={looping ? 'Stop the preview loop' : 'Preview loop'}
+            data-tip={looping ? 'Stop preview loop' : 'Preview loop'}
+            data-keys={looping ? 'Esc' : undefined}
           >
             {looping ? <RepeatOff size={16} aria-hidden="true" /> : <Repeat size={16} aria-hidden="true" />}
           </button>
@@ -229,7 +230,8 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
           className="btn-icon btn-danger"
           onClick={on.onRemove}
           aria-label="Remove transition"
-          title="Remove transition (Delete)"
+          data-tip="Remove transition"
+          data-keys="Delete"
           aria-keyshortcuts="Delete"
         >
           <Trash size={16} aria-hidden="true" />

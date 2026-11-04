@@ -422,6 +422,59 @@ h2[tabindex='-1']:focus-visible {
   box-shadow: none;
 }
 
+/* --- tooltip ------------------------------------------------------------- */
+
+.ui-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: ui-tooltip-in 90ms ease-out;
+}
+
+.ui-tooltip-keys {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.ui-tooltip kbd {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid rgb(255 255 255 / 0.28);
+  border-radius: 4px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.85);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+@keyframes ui-tooltip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-tooltip {
+    animation: none;
+  }
+}
+
 /* --- buttons ------------------------------------------------------------- */
 
 .btn {
@@ -512,7 +565,9 @@ h2[tabindex='-1']:focus-visible {
 
 .btn-play span {
   /* Optically centre the triangle. */
-  margin-left: 2px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .btn-play:disabled {
@@ -1448,9 +1503,65 @@ h2[tabindex='-1']:focus-visible {
   gap: 2px;
 }
 
+/* Zoom: a thin track, dark up to a small round thumb. --t (0…1) is set inline. */
 .zoom input[type='range'] {
+  --thumb: 12px;
   width: 88px;
-  accent-color: var(--primary);
+  height: 16px;
+  margin: 0 4px;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.zoom input[type='range']::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--text) 0 calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--t, 0)),
+    var(--border) 0
+  );
+}
+
+.zoom input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc((3px - var(--thumb)) / 2);
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+  transition: box-shadow 120ms;
+}
+
+.zoom input[type='range']::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.zoom input[type='range']::-moz-range-progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text);
+}
+
+.zoom input[type='range']::-moz-range-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+  transition: box-shadow 120ms;
+}
+
+.zoom input[type='range']:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgb(0 0 0 / 0.08);
+}
+
+.zoom input[type='range']:hover::-moz-range-thumb {
+  box-shadow: 0 0 0 4px rgb(0 0 0 / 0.08);
 }
 
 .zoom-fit {

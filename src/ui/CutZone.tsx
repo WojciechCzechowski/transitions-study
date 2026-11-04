@@ -30,6 +30,7 @@ export function CutZone({ cut, left, ready, engaged, pickerId, buttonRef, onHove
         aria-label={`Choose a transition for the cut between ${cut.from.label} and ${cut.to.label}${ready ? '' : ' (preparing frames)'}`}
         aria-controls={pickerId}
         aria-disabled={!ready || undefined}
+        data-tip={ready ? 'Add transition' : 'Preparing frames'}
         onFocus={() => onFocusChange(true)}
         onBlur={() => onFocusChange(false)}
         onClick={() => ready && onChoose()}
