@@ -1582,6 +1582,71 @@ h2[tabindex='-1']:focus-visible {
   border-right-color: var(--clip-select-strong);
 }
 
+/* Filmstrip: thumbnails across the clip, under the hairline, tint edge and name. */
+.clip-strip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.clip-tile {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  box-sizing: border-box;
+  border-left: 1px solid rgb(0 0 0 / 0.18);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.clip-tile:first-child {
+  border-left: 0;
+}
+
+.clip-tile.ready {
+  opacity: 1;
+}
+
+/* Hairline between neighbouring clips, drawn above the thumbnails. */
+.clip-body::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 1px 0 0 rgb(0 0 0 / 0.25);
+  pointer-events: none;
+}
+
+/* The source's tint as a thin bottom edge, so copies of one source read as related. */
+.clip-body::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--tone-strong);
+  pointer-events: none;
+}
+
+.clip-name {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  padding: 0 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.5);
+  pointer-events: none;
+}
+
 .clip.moving .clip-body {
   opacity: 0.55;
   cursor: grabbing;

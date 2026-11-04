@@ -5,9 +5,12 @@ import type { Clip } from '../model/timeline';
 import { visibleLength } from '../model/timeline';
 import { formatDuration, type Frames } from '../model/time';
 import { ClipInfo } from './ClipInfo';
+import { Filmstrip } from './Filmstrip';
 
 /** Narrower than this, the selected clip has no room for its info badge. */
 const INFO_MIN_WIDTH = 44;
+/** Narrower than this, the clip's name is hidden. */
+const NAME_MIN_WIDTH = 56;
 
 export interface TrimFeedback {
   readonly edge: TrimEdge;
@@ -165,7 +168,14 @@ export function ClipItem(props: Props) {
         onPointerCancel={(e) => onBodyUp(e, true)}
         onKeyDown={onBodyKey}
         onFocus={props.onSelect}
-      />
+      >
+        <Filmstrip sourceId={clip.sourceId} sourceIn={clip.sourceIn} sourceOut={clip.sourceOut} width={width} ppf={ppf} />
+        {width >= NAME_MIN_WIDTH && (
+          <span className="clip-name" aria-hidden="true">
+            {clip.label}
+          </span>
+        )}
+      </div>
       {selected && width >= INFO_MIN_WIDTH && <ClipInfo clip={clip} length={len} />}
       {(['start', 'end'] as const).map((edge) => (
         <div

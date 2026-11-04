@@ -4,6 +4,7 @@ import { Minus, Pause, Play, Plus, Redo2, Scan, SquareSplitHorizontal, Undo2 } f
 import { LIBRARY_INSERT } from '../config/study.config';
 import { getPreset, PRESETS, TRANSITION_DEFAULTS } from '../config/transitions.config';
 import type { FrameFeeder } from '../media/FrameFeeder';
+import type { ThumbCache } from '../media/ThumbCache';
 import type { Bezier } from '../model/easing';
 import {
   beginGesture,
@@ -58,6 +59,7 @@ import type { PreviewCandidate, PreviewController } from '../playback/PreviewCon
 import { Gallery } from './Gallery';
 import { isMac, isTextEntry, modKey } from './hooks';
 import { LibraryPanel } from './LibraryPanel';
+import { ThumbsContext } from './Filmstrip';
 import { Timeline, type Selection, type TimelineApi } from './Timeline';
 import { TransitionPopover } from './TransitionPopover';
 import { TransitionsPanel } from './TransitionsPanel';
@@ -67,6 +69,8 @@ interface Props {
   sources: readonly Source[];
   /** Decodes Library posters; null while the clips load. */
   feeder: FrameFeeder | null;
+  /** Timeline filmstrip thumbnails; null while the clips load. */
+  thumbs: ThumbCache | null;
   controller: PreviewController;
   ready: boolean;
   reducedMotion: boolean;
@@ -129,7 +133,7 @@ const SPLIT_REASONS:Record<Exclude<SplitResult, { ok: true }>['reason'], string>
  * when the clip manifest reloads, which resets history. Renders
  * the sidebar (Library / Transitions) and the timeline pane into the shell's slots.
  */
-export function Editor({ baseDoc, sources, feeder, controller, ready, reducedMotion, announce, sidebarEl, timelineEl }: Props) {
+export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, reducedMotion, announce, sidebarEl, timelineEl }: Props) {
   const [history, setHistory] = useState<History<Doc>>(() => createHistory(baseDoc));
   const doc = history.present;
 
@@ -938,7 +942,7 @@ export function Editor({ baseDoc, sources, feeder, controller, ready, reducedMot
   return (
     <>
       {createPortal(sidebar, sidebarEl)}
-      {createPortal(timeline, timelineEl)}
+      {createPortal(<ThumbsContext.Provider value={thumbs}>{timeline}</ThumbsContext.Provider>, timelineEl)}
       {selectedTransition && selectedCut && (
         <TransitionPopover
           transition={selectedTransition}

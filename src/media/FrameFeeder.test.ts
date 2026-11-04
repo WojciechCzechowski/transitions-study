@@ -39,6 +39,11 @@ class FakeSource implements GopSource<Fake> {
       });
     });
   }
+  readonly thumbCalls: number[] = [];
+  decodeThumb(gop: number) {
+    this.thumbCalls.push(gop);
+    return Promise.resolve(new Fake(`${this.sourceId}-thumb${gop}`));
+  }
   /** Finish the oldest decode in flight. */
   finish() {
     this.pending.shift()?.();
@@ -139,6 +144,22 @@ describe('FrameFeeder', () => {
     expect(errors).toHaveLength(1);
     feeder.setDemand([{ sourceId: 'a', frame: 7 }]);
     expect(a.calls).toEqual([0]);
+  });
+
+  it('decodes thumbnails only when no preview frame or poster is waiting', async () => {
+    const { a, feeder } = setup();
+    const got: string[] = [];
+    feeder.onThumb = (sourceId, gop, bm) => got.push(`${sourceId}:${gop}:${bm.name}`);
+    feeder.setDemand([{ sourceId: 'a', frame: 5 }]);
+    feeder.requestThumb('a', 3);
+    feeder.requestThumb('a', 7);
+    feeder.requestThumb('a', 3); // duplicate
+    expect(a.thumbCalls).toEqual([]);
+    a.finish();
+    await tick();
+    await tick();
+    expect(a.thumbCalls).toEqual([3, 7]);
+    expect(got).toEqual(['a:3:a-thumb3', 'a:7:a-thumb7']);
   });
 
   it('closes late frames after dispose', async () => {

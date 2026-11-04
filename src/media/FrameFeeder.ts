@@ -14,6 +14,8 @@ export interface GopSource<B> {
    * receiver owns every emitted bitmap (it stores or closes it).
    */
   decodeGop(gop: number, emit: (frame: Frames, bitmap: B) => void): Promise<void>;
+  /** Decode just a GOP's keyframe as a small thumbnail. */
+  decodeThumb(gop: number): Promise<B>;
 }
 
 interface Poster<B> {
@@ -28,14 +30,18 @@ interface Poster<B> {
  * of a decoded group is stored, since playback usually reaches the rest of
  * the group next; the store evicts frames nobody wants first, so they never
  * push out wanted ones. Library posters are decoded after the preview's own
- * demand.
+ * demand, and timeline thumbnails (one keyframe each) after those.
  */
 export class FrameFeeder<B extends Closable = ImageBitmap> {
   private demand: readonly FrameRef[] = [];
   private readonly busy = new Set<string>();
   private readonly failed = new Set<string>();
   private posters: Poster<B>[] = [];
+  /** Thumbnail keyframe groups to decode, per source, in request order. */
+  private readonly thumbs = new Map<string, Set<number>>();
   private disposed = false;
+  /** Receives each decoded thumbnail; it owns the bitmap. */
+  onThumb: ((sourceId: string, gop: number, bitmap: B) => void) | null = null;
 
   constructor(
     private readonly store: FrameStore<B>,
@@ -62,6 +68,15 @@ export class FrameFeeder<B extends Closable = ImageBitmap> {
     };
   }
 
+  /** Queue a timeline thumbnail (the keyframe of `gop`), decoded when nothing more urgent is waiting. */
+  requestThumb(sourceId: string, gop: number): void {
+    if (this.disposed) return;
+    let q = this.thumbs.get(sourceId);
+    if (!q) this.thumbs.set(sourceId, (q = new Set()));
+    q.add(gop);
+    this.pump();
+  }
+
   /** Sources with a decode in flight (for tests and diagnostics). */
   get inFlight(): ReadonlySet<string> {
     return this.busy;
@@ -71,6 +86,7 @@ export class FrameFeeder<B extends Closable = ImageBitmap> {
     this.disposed = true;
     this.demand = [];
     this.posters = [];
+    this.thumbs.clear();
   }
 
   /** The most urgent frame of this source that is missing: demand first, then posters. */
@@ -86,14 +102,17 @@ export class FrameFeeder<B extends Closable = ImageBitmap> {
     if (this.disposed) return;
     for (const src of this.sources.values()) {
       if (this.busy.has(src.sourceId) || this.failed.has(src.sourceId)) continue;
-      const target = this.nextTarget(src);
-      if (target === null) continue;
-      this.busy.add(src.sourceId);
       const fail = (e: unknown) => {
         this.busy.delete(src.sourceId);
         this.failed.add(src.sourceId);
         if (!this.disposed) this.onError(src.sourceId, e);
       };
+      const target = this.nextTarget(src);
+      if (target === null) {
+        this.pumpThumb(src, fail);
+        continue;
+      }
+      this.busy.add(src.sourceId);
       src
         .decodeGop(src.gopOf(target.frame), (frame, bitmap) => this.receive(src, frame, bitmap))
         .then(() => {
@@ -109,6 +128,20 @@ export class FrameFeeder<B extends Closable = ImageBitmap> {
           this.pump();
         }, fail);
     }
+  }
+
+  private pumpThumb(src: GopSource<B>, fail: (e: unknown) => void) {
+    const q = this.thumbs.get(src.sourceId);
+    const gop = q?.values().next().value;
+    if (q === undefined || gop === undefined) return;
+    q.delete(gop);
+    this.busy.add(src.sourceId);
+    src.decodeThumb(gop).then((bitmap) => {
+      this.busy.delete(src.sourceId);
+      if (this.disposed || !this.onThumb) bitmap.close();
+      else this.onThumb(src.sourceId, gop, bitmap);
+      this.pump();
+    }, fail);
   }
 
   private receive(src: GopSource<B>, frame: Frames, bitmap: B) {

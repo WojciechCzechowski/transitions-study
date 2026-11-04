@@ -6,6 +6,7 @@
  * internal output delay. Every VideoFrame is copied into an ImageBitmap and
  * closed straight away, so the decoder's own frame pool never runs dry.
  */
+import { THUMBS } from '../config/study.config';
 import type { Frames } from '../model/time';
 import { FPS } from '../model/time';
 import { StudyError } from './errors';
@@ -42,9 +43,23 @@ export async function checkDecoderSupport(track: Mp4Track, file: string): Promis
   }
 }
 
+/** Where decoded frames are drawn before being snapshotted: full size, or thumbnail size. */
+interface Target {
+  readonly canvas: OffscreenCanvas;
+  readonly ctx: OffscreenCanvasRenderingContext2D;
+}
+
 interface Job {
   readonly emit: (frame: Frames, bitmap: ImageBitmap) => void;
+  readonly target: Target;
   error: unknown;
+}
+
+function makeTarget(width: number, height: number, file: string): Target {
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) throw new StudyError('decode', 'Could not create a 2D canvas for decoding.', file);
+  return { canvas, ctx };
 }
 
 export class ClipDecoder implements GopSource<ImageBitmap> {
@@ -52,8 +67,8 @@ export class ClipDecoder implements GopSource<ImageBitmap> {
   readonly height: number;
   private decoder: VideoDecoder | null = null;
   private job: Job | null = null;
-  private readonly canvas: OffscreenCanvas;
-  private readonly ctx: OffscreenCanvasRenderingContext2D;
+  private readonly full: Target;
+  private readonly thumb: Target;
 
   constructor(
     readonly sourceId: string,
@@ -63,25 +78,43 @@ export class ClipDecoder implements GopSource<ImageBitmap> {
   ) {
     this.width = track.width;
     this.height = track.height;
-    this.canvas = new OffscreenCanvas(track.width, track.height);
-    const ctx = this.canvas.getContext('2d', { alpha: false });
-    if (!ctx) throw new StudyError('decode', 'Could not create a 2D canvas for decoding.', file);
-    this.ctx = ctx;
+    this.full = makeTarget(track.width, track.height, file);
+    this.thumb = makeTarget(THUMBS.width, THUMBS.height, file);
   }
 
   gopOf(frame: Frames): number {
     return gopOf(this.track, frame);
   }
 
-  /** Decode one GOP. After a decoder error it starts a fresh decoder and tries once more. */
-  async decodeGop(gop: number, emit: (frame: Frames, bitmap: ImageBitmap) => void): Promise<void> {
+  /** Decode one GOP at full size. */
+  decodeGop(gop: number, emit: (frame: Frames, bitmap: ImageBitmap) => void): Promise<void> {
+    const { start, end } = gopRange(this.track, gop);
+    return this.withRetry(gop, () => this.run(start, end, emit, this.full));
+  }
+
+  /** Decode only a GOP's keyframe (it needs no other frames), at thumbnail size. */
+  async decodeThumb(gop: number): Promise<ImageBitmap> {
+    const { start } = gopRange(this.track, gop);
+    let out: ImageBitmap | null = null;
+    await this.withRetry(gop, () =>
+      this.run(start, start + 1, (_f, bitmap) => {
+        out?.close();
+        out = bitmap;
+      }, this.thumb),
+    );
+    if (!out) throw new StudyError('decode', `The browser produced no thumbnail for ${this.file}.`, this.file);
+    return out;
+  }
+
+  /** After a decoder error, start a fresh decoder and try once more. */
+  private async withRetry(gop: number, attempt: () => Promise<void>): Promise<void> {
     try {
-      await this.run(gop, emit);
+      await attempt();
     } catch (first) {
       this.close();
       console.warn(`[decode] ${this.file}: retrying keyframe group ${gop} after`, first);
       try {
-        await this.run(gop, emit);
+        await attempt();
       } catch (e) {
         this.close();
         throw new StudyError('decode', `The browser could not decode ${this.file} (${e instanceof Error ? e.message : String(e)}).`, this.file, 'Re-generate the clips with the clip scripts, then Retry.');
@@ -109,11 +142,11 @@ export class ClipDecoder implements GopSource<ImageBitmap> {
     return decoder;
   }
 
-  private async run(gop: number, emit: Job['emit']): Promise<void> {
+  /** Decode frames [start, end), which must begin on a keyframe, then flush. */
+  private async run(start: Frames, end: Frames, emit: Job['emit'], target: Target): Promise<void> {
     const decoder = this.ensureDecoder();
-    const job: Job = { emit, error: null };
+    const job: Job = { emit, target, error: null };
     this.job = job;
-    const { start, end } = gopRange(this.track, gop);
     try {
       for (let i = start; i < end; i++) {
         const s = this.track.samples[i]!;
@@ -138,8 +171,9 @@ export class ClipDecoder implements GopSource<ImageBitmap> {
     try {
       if (!job) return;
       const index = Math.round(frame.timestamp / US_PER_FRAME);
-      this.ctx.drawImage(frame, 0, 0, this.width, this.height);
-      job.emit(index, this.canvas.transferToImageBitmap());
+      const { canvas, ctx } = job.target;
+      ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+      job.emit(index, canvas.transferToImageBitmap());
     } catch (e) {
       if (job) job.error = e;
     } finally {

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { DECODE, START_LAYOUT } from './config/study.config';
+import { DECODE, START_LAYOUT, THUMBS } from './config/study.config';
 import { checkDecoderSupport, ClipDecoder } from './media/ClipDecoder';
 import { isAbort, StudyError } from './media/errors';
 import { FrameFeeder } from './media/FrameFeeder';
 import { FrameStore } from './media/FrameStore';
+import { ThumbCache } from './media/ThumbCache';
 import { fetchClip, loadManifest, type Manifest } from './media/manifest';
 import { parseMp4 } from './media/mp4';
 import { createDoc, type Source } from './model/timeline';
@@ -24,6 +25,7 @@ export function App() {
   const reducedMotion = useReducedMotion();
   const [store] = useState(() => new FrameStore(DECODE.cacheBytes));
   const [feeder, setFeeder] = useState<FrameFeeder | null>(null);
+  const [thumbs, setThumbs] = useState<ThumbCache | null>(null);
   const [controller] = useState(() => new PreviewController(store));
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [manifestVersion, setManifestVersion] = useState(0);
@@ -72,6 +74,7 @@ export function App() {
       setLoad({ status: 'loading', phase: 'clips', done: sum(loaded), total: sum(totals) });
     };
     let feeder: FrameFeeder | null = null;
+    let thumbs: ThumbCache | null = null;
     const decoders: ClipDecoder[] = [];
     const fail = (e: unknown) => {
       if (isAbort(e) || ac.signal.aborted) return;
@@ -109,12 +112,18 @@ export function App() {
       raf = 0;
 
       for (const p of parsed) decoders.push(new ClipDecoder(p.clip.id, p.clip.file, p.bytes, p.track));
-      feeder = new FrameFeeder(
-        store,
-        new Map(decoders.map((d) => [d.sourceId, d])),
-        () => controller.framesArrived(),
-        (_sourceId, e) => fail(e),
+      const byId = new Map(decoders.map((d) => [d.sourceId, d]));
+      const f = new FrameFeeder(store, byId, () => controller.framesArrived(), (_sourceId, e) => fail(e));
+      const t = new ThumbCache(
+        THUMBS.cacheBytes,
+        THUMBS.width * THUMBS.height * 4,
+        (sourceId, frame) => byId.get(sourceId)?.gopOf(frame) ?? null,
+        (sourceId, gop) => f.requestThumb(sourceId, gop),
       );
+      f.onThumb = (sourceId, gop, bitmap) => t.put(sourceId, gop, bitmap);
+      feeder = f;
+      thumbs = t;
+      setThumbs(t);
       const frameBytes = Math.max(...parsed.map((p) => p.track.width * p.track.height * 4));
       const maxFrames = Math.max(2, Math.floor(DECODE.cacheBytes / frameBytes));
       setFeeder(feeder);
@@ -138,7 +147,9 @@ export function App() {
       feeder?.dispose();
       for (const d of decoders) d.close();
       store.clear();
+      thumbs?.clear();
       setFeeder(null);
+      setThumbs(null);
     };
   }, [manifest, controller, store]);
 
@@ -198,6 +209,7 @@ export function App() {
           baseDoc={docResult.doc}
           sources={sources}
           feeder={feeder}
+          thumbs={thumbs}
           controller={controller}
           ready={load.status === 'ready'}
           reducedMotion={reducedMotion}

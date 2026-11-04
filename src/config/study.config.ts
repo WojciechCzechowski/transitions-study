@@ -35,3 +35,14 @@ export const DECODE = {
   scrubAhead: 10,
   scrubBehind: 5,
 } as const;
+
+/**
+ * Timeline filmstrip thumbnails: one per keyframe at most (each decodes on
+ * its own), kept separately from the preview cache. 224×126 is sharp at 2×
+ * on a 70 px tall tile; 48 MB holds about 420, roughly 140 s of footage.
+ */
+export const THUMBS = {
+  width: 224,
+  height: 126,
+  cacheBytes: 48 * 1024 * 1024,
+} as const;
