@@ -20,6 +20,13 @@
   --primary: #111111;
   --on-primary: #ffffff;
   --select: #111111;
+  /* Selected clip frame; its thicker sides are the trim handles. */
+  --clip-select: #2f62f5;
+  --clip-select-strong: #1d45c4;
+  --clip-frame: 2px;
+  --clip-handle-w: 4px;
+  /* Pass-through strip on the cut under a transition (±4px). */
+  --cut-gap: 8px;
   --focus: #111111;
   --warn: #a15c00;
   --warn-bg: #fff4e0;
@@ -1462,13 +1469,62 @@ h2[tabindex='-1']:focus-visible {
   height: 72px;
 }
 
+/* Info badge on the selected clip, clear of the start trim grip. */
+.clip-info {
+  position: absolute;
+  top: 6px;
+  left: 12px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--primary);
+  color: var(--on-primary);
+  cursor: default;
+}
+
+.clip-info-card {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-pop);
+  animation: ui-tooltip-in 90ms ease-out;
+}
+
+.clip-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-info-row svg {
+  flex: none;
+  opacity: 0.85;
+}
+
+.clip-info-dim {
+  color: rgb(255 255 255 / 0.5);
+}
+
 .clip-body {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid rgb(0 0 0 / 0.08);
   background: var(--tone);
@@ -1481,13 +1537,42 @@ h2[tabindex='-1']:focus-visible {
   box-shadow: inset 1px 0 0 rgb(0 0 0 / 0.25);
 }
 
-.clip.compact .clip-body {
-  padding: 6px 4px;
+
+/*
+ * Selection frame over the clip: thin top and bottom, thick sides. The sides are
+ * the trim handles: each lights up on its own when its grip is hovered, focused
+ * or dragged, and gets darker when the clip is already selected.
+ */
+.clip::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: solid transparent;
+  border-width: var(--clip-frame) var(--clip-handle-w);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  transition: border-color 100ms;
 }
 
-.clip.selected .clip-body {
-  border-color: var(--select);
-  box-shadow: 0 0 0 1px var(--select);
+.clip.selected::before {
+  border-color: var(--clip-select);
+}
+
+.clip:has(.grip-start:is(:hover, :active, :focus-visible))::before {
+  border-left-color: var(--clip-select);
+}
+
+.clip:has(.grip-end:is(:hover, :active, :focus-visible))::before {
+  border-right-color: var(--clip-select);
+}
+
+.clip.selected:has(.grip-start:is(:hover, :active, :focus-visible))::before {
+  border-left-color: var(--clip-select-strong);
+}
+
+.clip.selected:has(.grip-end:is(:hover, :active, :focus-visible))::before {
+  border-right-color: var(--clip-select-strong);
 }
 
 .clip.moving .clip-body {
@@ -1495,21 +1580,7 @@ h2[tabindex='-1']:focus-visible {
   cursor: grabbing;
 }
 
-.clip-name {
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
-.clip-range {
-  font-size: 11px;
-  color: rgb(0 0 0 / 0.6);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 .trim-grip {
   position: absolute;
@@ -1529,35 +1600,9 @@ h2[tabindex='-1']:focus-visible {
   right: 0;
 }
 
-.trim-grip::after {
-  content: '';
-  position: absolute;
-  top: 18px;
-  bottom: 18px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--tone-strong);
-  opacity: 0;
-  transition: opacity 100ms;
-}
-
-.grip-start::after {
-  left: 3px;
-}
-
-.grip-end::after {
-  right: 3px;
-}
-
-.clip:hover .trim-grip::after,
-.clip.selected .trim-grip::after,
-.trim-grip:focus-visible::after {
-  opacity: 1;
-}
-
-.trim-grip:hover::after,
-.trim-grip:active::after {
-  background: var(--text);
+/* The highlighted frame side is the focus indicator. */
+.trim-grip:focus-visible {
+  outline: none;
 }
 
 .clip-tooltip {
@@ -1846,24 +1891,85 @@ h2[tabindex='-1']:focus-visible {
   }
 }
 
+/*
+ * A pane of glass over the cut: mostly transparent, so both clips and the line
+ * where they meet stay visible. Bright rim and top highlight, a hairline dark
+ * outline for contrast on pale clips, and a soft lift. Only a hint of blur, so
+ * the clip edges underneath stay crisp.
+ */
 .transition-body {
   position: absolute;
   inset: 0;
   width: 100%;
-  padding: 0 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 4px 8px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgb(0 0 0 / 0.35);
-  background: linear-gradient(90deg, rgb(0 0 0 / 0.22), rgb(0 0 0 / 0.1)), var(--surface);
+  border: 1px solid rgb(255 255 255 / 0.85);
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.5), rgb(255 255 255 / 0.2));
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.14),
+    inset 0 1px 0 rgb(255 255 255 / 0.9),
+    0 2px 8px rgb(0 0 0 / 0.12);
+  -webkit-backdrop-filter: blur(1.5px) saturate(1.15);
+  backdrop-filter: blur(1.5px) saturate(1.15);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
+  line-height: 14px;
+  text-align: left;
   cursor: pointer;
   overflow: hidden;
 }
 
+/*
+ * Wide enough transitions let the pointer through a strip centred on the cut,
+ * so the trim edges of the clips underneath can be grabbed (A's end left of
+ * the cut, B's start right of it). The body ignores the pointer; two hit areas
+ * either side of the strip take the clicks, which still bubble to the body.
+ */
+.transition-hit {
+  display: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+/* The wrapper and the body both let the pointer through; only the hit areas and edges take it. */
+.transition-object.pass-through,
+.transition-object.pass-through .transition-body {
+  pointer-events: none;
+}
+
+.transition-object.pass-through .transition-hit {
+  display: block;
+  pointer-events: auto;
+}
+
+.transition-object.pass-through .edge {
+  pointer-events: auto;
+}
+
+.hit-left {
+  left: 0;
+  right: calc(50% + var(--cut-gap) / 2);
+}
+
+.hit-right {
+  left: calc(50% + var(--cut-gap) / 2);
+  right: 0;
+}
+
 .transition-label {
   display: block;
+  position: relative;
+  pointer-events: none;
+  min-width: 0;
+  max-width: 100%;
+  /* Readable over any clip colour. */
+  text-shadow: 0 0 3px rgb(255 255 255 / 0.9);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1875,14 +1981,42 @@ h2[tabindex='-1']:focus-visible {
   z-index: 6;
 }
 
-.transition-object.selected .transition-body {
-  border-color: var(--select);
-  box-shadow: 0 0 0 2px var(--select);
+/* Same frame as a selected clip: the thick sides are the duration handles. */
+.transition-object::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: solid transparent;
+  border-width: var(--clip-frame) var(--clip-handle-w);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  transition: border-color 100ms;
 }
 
-.transition-object.at-limit .transition-body {
-  border-color: var(--warn);
-  box-shadow: 0 0 0 2px var(--warn);
+.transition-object.selected::before {
+  border-color: var(--clip-select);
+}
+
+.transition-object:has(.edge-left:is(:hover, :active, :focus-visible))::before {
+  border-left-color: var(--clip-select);
+}
+
+.transition-object:has(.edge-right:is(:hover, :active, :focus-visible))::before {
+  border-right-color: var(--clip-select);
+}
+
+.transition-object.selected:has(.edge-left:is(:hover, :active, :focus-visible))::before {
+  border-left-color: var(--clip-select-strong);
+}
+
+.transition-object.selected:has(.edge-right:is(:hover, :active, :focus-visible))::before {
+  border-right-color: var(--clip-select-strong);
+}
+
+/* Hitting the duration limit wins over the blue, including the side being dragged. */
+.transition-object.at-limit::before {
+  border-color: var(--warn) !important;
 }
 
 .edge {
@@ -1895,17 +2029,6 @@ h2[tabindex='-1']:focus-visible {
   z-index: 1;
 }
 
-.edge::after {
-  content: '';
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: 5px;
-  width: 2px;
-  border-radius: 1px;
-  background: rgb(0 0 0 / 0.55);
-}
-
 .edge-left {
   left: -6px;
 }
@@ -1914,9 +2037,9 @@ h2[tabindex='-1']:focus-visible {
   right: -6px;
 }
 
-.edge:hover::after,
-.dragging .edge::after {
-  background: var(--text);
+/* The highlighted frame side is the focus indicator. */
+.edge:focus-visible {
+  outline: none;
 }
 
 .tooltip {

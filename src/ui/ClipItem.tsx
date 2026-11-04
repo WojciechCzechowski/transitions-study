@@ -4,6 +4,10 @@ import type { TrimEdge, TrimLimit } from '../model/ops';
 import type { Clip } from '../model/timeline';
 import { visibleLength } from '../model/timeline';
 import { formatDuration, type Frames } from '../model/time';
+import { ClipInfo } from './ClipInfo';
+
+/** Narrower than this, the selected clip has no room for its info badge. */
+const INFO_MIN_WIDTH = 44;
 
 export interface TrimFeedback {
   readonly edge: TrimEdge;
@@ -143,11 +147,10 @@ export function ClipItem(props: Props) {
   };
 
   const len = visibleLength(clip);
-  const compact = width < 64;
 
   return (
     <div
-      className={`clip tone-${tone % 4}${selected ? ' selected' : ''}${moving ? ' moving' : ''}${compact ? ' compact' : ''}`}
+      className={`clip tone-${tone % 4}${selected ? ' selected' : ''}${moving ? ' moving' : ''}`}
       style={{ left, width }}
     >
       <div
@@ -162,14 +165,8 @@ export function ClipItem(props: Props) {
         onPointerCancel={(e) => onBodyUp(e, true)}
         onKeyDown={onBodyKey}
         onFocus={props.onSelect}
-      >
-        <span className="clip-name">{clip.label}</span>
-        {!compact && (
-          <span className="clip-range">
-            {len} f · src {clip.sourceIn}–{clip.sourceOut - 1}
-          </span>
-        )}
-      </div>
+      />
+      {selected && width >= INFO_MIN_WIDTH && <ClipInfo clip={clip} length={len} />}
       {(['start', 'end'] as const).map((edge) => (
         <div
           key={edge}

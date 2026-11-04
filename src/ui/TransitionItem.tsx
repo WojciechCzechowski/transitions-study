@@ -6,6 +6,9 @@ import { setDuration } from '../model/ops';
 import type { ClampResult, Cut, Doc, Limits, Transition } from '../model/timeline';
 import { formatDuration, FPS, type Frames } from '../model/time';
 
+/** Narrower than this, the transition stays fully clickable: a gap would leave too little to click. */
+const PASS_THROUGH_MIN_WIDTH = 40;
+
 export interface Gesture {
   begin: () => void;
   update: (doc: Doc) => void;
@@ -149,7 +152,7 @@ export function TransitionItem(props: Props) {
         />
       )}
       <div
-        className={`transition-object${selected ? ' selected' : ''}${dragEdge ? ' dragging' : ''}${limitHit === 'max' ? ' at-limit' : ''}`}
+        className={`transition-object${selected ? ' selected' : ''}${dragEdge ? ' dragging' : ''}${limitHit === 'max' ? ' at-limit' : ''}${width >= PASS_THROUGH_MIN_WIDTH ? ' pass-through' : ''}`}
         style={{ left, width }}
       >
         <button
@@ -161,6 +164,9 @@ export function TransitionItem(props: Props) {
           onFocus={props.onSelect}
           onClick={props.onSelect}
         >
+          {/* Click targets either side of the cut; the gap between them reaches the clips' trim edges. */}
+          <span className="transition-hit hit-left" aria-hidden="true" />
+          <span className="transition-hit hit-right" aria-hidden="true" />
           <span className="transition-label">
             {name} · {t.duration} f
           </span>
