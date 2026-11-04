@@ -55,6 +55,8 @@ export function TransitionItem(props: Props) {
   const [dragEdge, setDragEdge] = useState<Edge | null>(null);
   const [edgeFocused, setEdgeFocused] = useState<Edge | null>(null);
   const [limitHit, setLimitHit] = useState<ClampResult['clamped']>(null);
+  /** A keyboard step happened since the edge took focus: keep its readout up. */
+  const [stepped, setStepped] = useState(false);
   const drag = useRef<DragState | null>(null);
   const latest = useRef(props);
   useLayoutEffect(() => {
@@ -93,6 +95,7 @@ export function TransitionItem(props: Props) {
     drag.current = { edge, pointerId: e.pointerId, startX: e.clientX, startDuration: t.duration, baseDoc: doc, announcedLimit: false, trimmed: NO_ROOM };
     setDragEdge(edge);
     setLimitHit(null);
+    setStepped(false);
     props.onSelect();
     props.onGestureActive(true);
     props.gesture.begin();
@@ -138,12 +141,14 @@ export function TransitionItem(props: Props) {
     e.stopPropagation();
     const r = props.onStepDuration(requested);
     setLimitHit(r.clamped);
+    setStepped(true);
     if (r.clamped === 'max') props.announce(describeLimit(cut, limits));
     else if (r.clamped === 'min') props.announce(describeMinimum(limits));
   };
 
   const name = getPreset(t.presetId).name;
-  const showTooltip = dragEdge !== null || edgeFocused !== null;
+  // Focus alone doesn't show it: a drag leaves the edge focused after release.
+  const showTooltip = dragEdge !== null || (edgeFocused !== null && stepped);
   const reason = limitHit === 'max' ? describeLimit(cut, limits) : limitHit === 'min' ? describeMinimum(limits) : null;
 
   return (
@@ -198,6 +203,7 @@ export function TransitionItem(props: Props) {
             onBlur={() => {
               setEdgeFocused(null);
               setLimitHit(null);
+              setStepped(false);
             }}
           />
         ))}
