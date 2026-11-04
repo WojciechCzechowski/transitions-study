@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type Ref } from 'react';
+import { SlidersHorizontal, Trash } from 'lucide-react';
 import type { PresetConfig } from '../config/transitions.config';
 import { nextGalleryIndex } from '../model/galleryNav';
 import { lastInputWasKeyboard } from './hooks';
@@ -47,7 +48,21 @@ interface Props {
   onEscape: () => void;
   /** Pointer over the picker or focus inside it. */
   onActiveChange: (active: boolean) => void;
+  /** The preset whose settings popover is open. */
+  tuningId: string | null;
+  /** The settings button on a card: opens (or closes) that preset's popover. */
+  onTune: (id: string) => void;
+  /** The trash button on the applied card. */
+  onRemove: () => void;
 }
+
+/** Keeps a press or key on a card's own buttons from also dragging, applying or moving in the list. */
+const keepToButton = {
+  onPointerDown: (e: PointerEvent) => e.stopPropagation(),
+  onKeyDown: (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+  },
+};
 
 /**
  * Level-1 preset picker in the sidebar. Roving focus: one tab stop, arrow keys
@@ -58,7 +73,7 @@ interface Props {
 const DRAG_THRESHOLD_PX = 4;
 
 export function Gallery(props: Props) {
-  const { presets, appliedId, previewId, disabledReason, noticeTone, draggable, draggingId, previewOnHover } = props;
+  const { presets, appliedId, previewId, disabledReason, noticeTone, draggable, draggingId, previewOnHover, tuningId } = props;
   const press = useRef<{ pointerId: number; id: string; x: number; y: number; dragging: boolean } | null>(null);
   /** The last press turned into a drag, so the click that follows it isn't an apply. */
   const dragged = useRef(false);
@@ -222,7 +237,8 @@ export function Gallery(props: Props) {
               items.current[i] = el;
             }}
             role="option"
-            className={`preset${previewId === p.id ? ' previewing' : ''}${appliedId === p.id ? ' applied' : ''}${draggingId === p.id ? ' dragging' : ''}`}
+            data-preset={p.id}
+            className={`preset${previewId === p.id ? ' previewing' : ''}${appliedId === p.id ? ' applied' : ''}${draggingId === p.id ? ' dragging' : ''}${tuningId === p.id ? ' tuning' : ''}`}
             tabIndex={i === focusIndex ? 0 : -1}
             aria-selected={appliedId === p.id}
             aria-disabled={disabled || undefined}
@@ -231,9 +247,10 @@ export function Gallery(props: Props) {
             onPointerMove={onTilePointerMove}
             onPointerUp={(e) => onTilePointerUp(e)}
             onPointerCancel={(e) => onTilePointerUp(e, true)}
-            onFocus={() => {
+            onFocus={(e) => {
               setFocusIndex(i);
-              if (!disabled && lastInputWasKeyboard()) props.onPreview(p.id);
+              // Focus on the card's own buttons doesn't preview.
+              if (e.target === e.currentTarget && !disabled && lastInputWasKeyboard()) props.onPreview(p.id);
             }}
             onClick={() => {
               if (dragged.current) {
@@ -246,6 +263,36 @@ export function Gallery(props: Props) {
             <span className="preset-thumb">
               <PresetIcon id={p.id} />
               {appliedId === p.id && <span className="preset-badge">Applied</span>}
+              <button
+                type="button"
+                className="preset-action preset-tune"
+                aria-expanded={tuningId === p.id}
+                aria-label={`${p.name} settings`}
+                data-tip="Feel and Fine-tune"
+                {...keepToButton}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onTune(p.id);
+                }}
+              >
+                <SlidersHorizontal size={14} aria-hidden="true" />
+              </button>
+              {appliedId === p.id && (
+                <button
+                  type="button"
+                  className="preset-action preset-remove"
+                  aria-label={`Remove ${p.name}`}
+                  data-tip="Remove transition"
+                  data-keys="Delete"
+                  {...keepToButton}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    props.onRemove();
+                  }}
+                >
+                  <Trash size={14} aria-hidden="true" />
+                </button>
+              )}
             </span>
             <span className="preset-name">{p.name}</span>
             <span className="preset-hint">{p.hint}</span>

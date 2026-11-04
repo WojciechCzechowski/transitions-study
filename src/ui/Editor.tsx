@@ -5,6 +5,7 @@ import { getPreset, PRESETS, TRANSITION_DEFAULTS } from '../config/transitions.c
 import type { FrameFeeder } from '../media/FrameFeeder';
 import type { ThumbCache } from '../media/ThumbCache';
 import type { Bezier } from '../model/easing';
+import { normalizeFeel, normalizeIntensity, type Tuning } from '../model/feel';
 import {
   beginGesture,
   canRedo,
@@ -29,6 +30,7 @@ import {
   insertClipRange,
   moveClip,
   removeTransition,
+  clearIntensity,
   resetTuning,
   setDuration,
   setEasing,
@@ -38,6 +40,7 @@ import {
   trimClip,
   type SplitResult,
   type TrimEdge,
+  type ApplyLook,
 } from '../model/ops';
 import {
   clampDuration,
@@ -91,8 +94,7 @@ type Tab = 'library' | 'transitions';
 type FocusTarget =
   | { kind: 'cut'; key: string }
   | { kind: 'transition'; id: string }
-  | { kind: 'picker' }
-  | { kind: 'edit' };
+  | { kind: 'picker' };
 
 /** A preset tile being dragged toward the timeline; `cutKey` is the cut under the pointer. */
 interface PresetDrag {
@@ -153,9 +155,15 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewOnHover, setPreviewOnHoverState] = useState(readPreviewOnHover);
   const [preview, setPreview] = useState({ active: false, playing: false });
-  const [looping, setLooping] = useState(false);
-  /** The popover's Fine-tune section; stays open across selections. */
-  const [fineTuneOpen, setFineTuneOpen] = useState(false);
+  /** The preset card whose settings popover is open; it previews in the viewer while open. */
+  const [tuningId, setTuningId] = useState<string | null>(null);
+  /**
+   * Feel and Fine-tune set up on a preset before it's applied, per preset, for the session.
+   * Not undoable: they describe the next apply, not the edit.
+   */
+  const [drafts, setDrafts] = useState<Readonly<Record<string, ApplyLook>>>({});
+  /** The timeline as a popover Duration drag began: the drag resizes from it, as the edge handles do. */
+  const [durationBase, setDurationBase] = useState<Doc | null>(null);
   const [zoom, setZoom] = useState<number | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [libDrag, setLibDrag] = useState<{ sourceId: string; x: number; y: number; index: number | null } | null>(null);
@@ -167,7 +175,6 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const [insertSourceId, setInsertSourceId] = useState<string | null>(null);
 
   const pickerListRef = useRef<HTMLDivElement>(null);
-  const editHeadingRef = useRef<HTMLHeadingElement>(null);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ library: null, transitions: null });
   const [cutEls] = useState(() => new Map<string, HTMLButtonElement>());
   const [transitionEls] = useState(() => new Map<string, HTMLButtonElement>());
@@ -213,6 +220,8 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
 
   const setTab = (t: Tab) => {
     setTabState(t);
+    // The settings popover (and its preview) lives on the Transitions tab.
+    if (t !== 'transitions') setTuningId(null);
     try {
       localStorage.setItem(TAB_KEY, t);
     } catch {
@@ -228,10 +237,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       onPlayingChange: setPlaying,
       onPreviewChange: (s) => {
         setPreview(s);
-        if (!s.active) {
-          setPreviewId(null);
-          setLooping(false);
-        }
+        if (!s.active) setPreviewId(null);
       },
     });
     return () => controller.setCallbacks(null);
@@ -276,26 +282,12 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     if (targetCutKey && !cutByKey(doc, targetCutKey)) setTargetCutKey(null);
   }, [doc, targetCutKey]);
 
-  // Keep the selected-transition loop in sync with Feel, Fine-tune and duration edits.
-  // The transition object only changes identity when one of those does.
-  useEffect(() => {
-    if (!looping) return;
-    if (!selectedTransition) {
-      controller.endPreview();
-      return;
-    }
-    const { id: _id, fromId: _from, toId: _to, ...look } = selectedTransition;
-    controller.preview({ cutKey: transitionCutKey(selectedTransition), ...look }, { autoplay: true, once: reducedMotion });
-  }, [controller, looping, selectedTransition, reducedMotion]);
-
-  // A picker preview belongs to its cut; switching cuts ends it.
+  // A picker preview and the settings popover belong to their cut; switching cuts ends them.
   const targetKey = targetCut?.key ?? null;
-  const loopingRef = useRef(looping);
-  loopingRef.current = looping;
   useEffect(() => {
-    if (loopingRef.current) return;
     controller.endPreview();
     setPreviewId(null);
+    setTuningId(null);
   }, [controller, targetKey]);
 
   useEffect(() => {
@@ -307,9 +299,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
         ? pickerListRef.current?.querySelector<HTMLElement>('[tabindex="0"]')
         : target.kind === 'cut'
           ? cutEls.get(target.key)
-          : target.kind === 'transition'
-            ? transitionEls.get(target.id)
-            : editHeadingRef.current;
+          : transitionEls.get(target.id);
     el?.focus({ preventScroll: true });
   });
 
@@ -371,7 +361,8 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     const l = getLimits(doc, cut);
     if (!l.canTransition) return null;
     const t = transitionAt(doc, cut.key);
-    if (t) {
+    const draft = drafts[presetId];
+    if (t && !draft) {
       return {
         cutKey: cut.key,
         presetId,
@@ -381,11 +372,11 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
         ...(t.intensity !== undefined && t.presetId === presetId && { intensity: t.intensity }),
       };
     }
-    // A new transition may trim the clips to make room: preview the timeline as it would be.
-    const r = applyTransition(doc, cut.key, presetId, TRANSITION_DEFAULTS);
+    // A new transition (or a drafted duration) may trim the clips to make room: preview the timeline as it would be.
+    const r = applyTransition(doc, cut.key, presetId, { ...TRANSITION_DEFAULTS, ...(draft && { look: draft }) });
     if (!r.ok) return null;
-    const { feel, duration } = r.transition;
-    return { cutKey: cut.key, presetId, duration, feel, ...(r.trimmed !== NO_ROOM && { doc: r.doc }) };
+    const { id: _id, fromId: _from, toId: _to, ...look } = r.transition;
+    return { cutKey: cut.key, ...look, ...(r.trimmed !== NO_ROOM && { doc: r.doc }) };
   };
 
   /** What applying a preset at `cut` would trim to make room (nothing when replacing). */
@@ -396,7 +387,8 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   };
 
   const onPreview = (id: string) => {
-    if (!previewOnHover) return;
+    // The settings popover owns the viewer while it's open.
+    if (!previewOnHover || tuningId) return;
     const c = targetCut ? candidateAt(targetCut, id) : null;
     if (!c) return;
     setPreviewId(id);
@@ -411,15 +403,15 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       // Not persisted; fine.
     }
     // Turning it off stops a gallery preview that's running now.
-    if (!on && previewId && !presetDragRef.current) {
+    if (!on && previewId && !presetDragRef.current && !tuningId) {
       controller.endPreview();
       setPreviewId(null);
     }
   };
 
   const onLeavePreview = () => {
-    // A preset drag owns the preview until it drops.
-    if (presetDragRef.current) return;
+    // A preset drag owns the preview until it drops; the settings popover until it closes.
+    if (presetDragRef.current || tuningId) return;
     controller.endPreview();
     setPreviewId(null);
   };
@@ -435,7 +427,12 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
 
   const applyAt = (target: Cut, id: string) => {
     const preset = getPreset(id);
-    const r = applyTransition(doc, target.key, id, { feel: TRANSITION_DEFAULTS.feel, duration: TRANSITION_DEFAULTS.duration });
+    const draft = drafts[id];
+    const r = applyTransition(doc, target.key, id, {
+      feel: TRANSITION_DEFAULTS.feel,
+      duration: TRANSITION_DEFAULTS.duration,
+      ...(draft && { look: draft }),
+    });
     if (!r.ok) {
       if (r.limits) announce(describeNoHandles(target, r.limits));
       return;
@@ -443,15 +440,15 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     if (r.doc !== doc) commitDoc(r.doc, r.replaced ? `Change to ${preset.name}` : `Apply ${preset.name}`);
     controller.endPreview();
     setPreviewId(null);
+    setTuningId(null);
     setTargetCutKey(target.key);
     setSelection({ kind: 'transition', id: r.transition.id });
     setTab('transitions');
-    requestFocus({ kind: 'edit' });
     const cut = cutByKey(r.doc, target.key)!;
     const capped = r.clamped === 'max' ? ` ${describeLimit(cut, getLimits(r.doc, cut))}.` : '';
     const trimmed = r.trimmed !== NO_ROOM ? ` ${describeTrim(cut, r.trimmed)}` : '';
     if (r.doc === doc) announce(`${preset.name} selected`);
-    else if (r.replaced) announce(`Changed to ${preset.name}: ${formatDuration(r.transition.duration)}, Feel kept.${capped}`);
+    else if (r.replaced) announce(`Changed to ${preset.name}: ${formatDuration(r.transition.duration)}, ${draft ? 'with its settings' : 'Feel kept'}.${capped}`);
     else announce(`${preset.name} applied: ${formatDuration(r.transition.duration)}, centred on the cut.${trimmed}${capped}`);
   };
 
@@ -460,6 +457,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     if (!t) return;
     const name = getPreset(t.presetId).name;
     controller.endPreview();
+    setTuningId(null);
     commitDoc(removeTransition(doc, cutKey), `Remove ${name}`);
     setSelection(null);
     // Stay on the cut, so another preset can go straight back on.
@@ -468,24 +466,29 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     announce(`${name} removed`);
   };
 
-  /** A slider drag in the popover is one undo step, labelled `label`. */
+  /** The settings popover edits the transition on the timeline when its preset is the one applied there. */
+  const tuningLive = tuningId !== null && targetTransition?.presetId === tuningId;
+
+  /** A slider drag in the popover on a live transition is one undo step, labelled `label`. */
   const onSliderPointerDown = (label: string) => {
-    if (sliderGesture.current) return;
+    if (sliderGesture.current || !tuningLive) return;
     sliderGesture.current = true;
     gesture.begin();
+    if (label === 'Change duration') setDurationBase(doc);
     const end = () => {
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
       sliderGesture.current = false;
+      setDurationBase(null);
       gesture.end(label);
     };
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
   };
 
-  /** Apply a Feel / Fine-tune edit to the selected transition, inside a slider drag or as its own step. */
+  /** Apply a Feel / Fine-tune edit to the transition at the cut, inside a slider drag or as its own step. */
   const editLook = (edit: (doc: Doc, cutKey: string) => Doc, label: string) => {
-    const t = selectedTransition;
+    const t = targetTransition;
     if (!t) return;
     const next = edit(doc, transitionCutKey(t));
     if (next === doc) return;
@@ -493,10 +496,114 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     else commitDoc(next, label);
   };
 
-  const onFeelInput = (value: number) => editLook((d, k) => setFeel(d, k, value), 'Change feel');
-  const onIntensityInput = (value: number) => editLook((d, k) => setIntensity(d, k, value), 'Change intensity');
-  const onEasingPick = (bezier: Bezier) => editLook((d, k) => setEasing(d, k, bezier), 'Change easing');
-  const onResetTuning = () => editLook(resetTuning, 'Reset to Feel');
+  /** What the popover shows for a preset that isn't applied here: its draft, else what applying would give. */
+  const draftLook = (id: string): { tuning: Tuning; duration: Frames } => {
+    const c = targetCut ? candidateAt(targetCut, id) : null;
+    const d = drafts[id];
+    const tuning: Tuning = c
+      ? { feel: c.feel, ...(c.easing && { easing: c.easing }), ...(c.intensity !== undefined && { intensity: c.intensity }) }
+      : (d ?? { feel: TRANSITION_DEFAULTS.feel });
+    return { tuning, duration: c?.duration ?? d?.duration ?? TRANSITION_DEFAULTS.duration };
+  };
+
+  /**
+   * Edit the draft of the preset in the popover (the same rules as the ops on a live transition).
+   * A duration is kept in the draft only once it's been changed there, so tuning Feel alone
+   * never resizes the transition it replaces.
+   */
+  const editDraft = (edit: (t: Tuning) => Tuning, duration?: Frames) => {
+    const id = tuningId;
+    if (!id) return;
+    const kept = duration ?? drafts[id]?.duration;
+    const next: ApplyLook = { ...edit(draftLook(id).tuning), ...(kept !== undefined && { duration: kept }) };
+    setDrafts((d) => ({ ...d, [id]: next }));
+  };
+
+  const onDurationInput = (value: Frames) => {
+    if (!tuningLive) {
+      editDraft((t) => t, value);
+      return;
+    }
+    const t = targetTransition;
+    if (!t) return;
+    const r = setDuration(durationBase ?? doc, transitionCutKey(t), value);
+    if (sliderGesture.current) gesture.update(r.doc);
+    else if (r.doc !== doc) commitDoc(r.doc, 'Change duration');
+  };
+
+  // The Duration slider's range; during a drag, from the timeline as the drag began.
+  const durationLimits = targetCut ? (durationBase ? getLimits(durationBase, targetCut) : limits) : null;
+  const durationRange = durationLimits?.canTransition ? { min: durationLimits.min, max: durationLimits.max } : null;
+
+  const onFeelInput = (value: number) =>
+    tuningLive ? editLook((d, k) => setFeel(d, k, value), 'Change feel') : editDraft(() => ({ feel: normalizeFeel(value) }));
+  const onIntensityInput = (value: number) =>
+    tuningLive
+      ? editLook((d, k) => setIntensity(d, k, value), 'Change intensity')
+      : editDraft((t) => ({ ...t, intensity: normalizeIntensity(value) }));
+  const onEasingPick = (bezier: Bezier) =>
+    tuningLive ? editLook((d, k) => setEasing(d, k, bezier), 'Change easing') : editDraft((t) => ({ ...t, easing: bezier }));
+  const onResetTuning = () => (tuningLive ? editLook(resetTuning, 'Reset to Feel') : editDraft((t) => ({ feel: t.feel })));
+
+  // Double-click on a slider's handle: back to the default. Each is its own undo step on a live transition.
+  const onDurationReset = () => {
+    if (!tuningLive) {
+      // A draft without a duration takes the default (or keeps the length of what it replaces).
+      const id = tuningId;
+      if (!id) return;
+      setDrafts((d) => {
+        const { duration: _drop, ...rest }: ApplyLook = d[id] ?? draftLook(id).tuning;
+        return { ...d, [id]: rest };
+      });
+      return;
+    }
+    const t = targetTransition;
+    if (!t) return;
+    const r = setDuration(doc, transitionCutKey(t), TRANSITION_DEFAULTS.duration);
+    if (r.doc !== doc) commitDoc(r.doc, 'Reset duration');
+  };
+  const onFeelReset = () =>
+    tuningLive
+      ? editLook((d, k) => setFeel(d, k, TRANSITION_DEFAULTS.feel), 'Reset feel')
+      : editDraft(() => ({ feel: TRANSITION_DEFAULTS.feel }));
+  const onIntensityReset = () =>
+    tuningLive
+      ? editLook(clearIntensity, 'Reset intensity')
+      : editDraft(({ intensity: _drop, ...rest }) => rest);
+
+  const toggleTuning = (id: string) => {
+    if (tuningId === id) {
+      setTuningId(null);
+      controller.endPreview();
+      return;
+    }
+    controller.pause();
+    setPreviewId(null);
+    setTuningId(id);
+  };
+
+  // While the settings popover is open, loop its transition in the viewer at the cut,
+  // following every Feel, Fine-tune and duration change. Re-previewing keeps the same moment.
+  const tuneCandidate =
+    tuningId && targetCut
+      ? tuningLive && targetTransition
+        ? (({ id: _id, fromId: _from, toId: _to, ...look }) => ({ cutKey: targetCut.key, ...look }))(targetTransition)
+        : candidateAt(targetCut, tuningId)
+      : null;
+  const tuneCandidateRef = useRef(tuneCandidate);
+  tuneCandidateRef.current = tuneCandidate;
+  const tuneKey = tuneCandidate ? JSON.stringify({ ...tuneCandidate, doc: undefined }) : null;
+  const tunePreviewing = useRef(false);
+  useEffect(() => {
+    const c = tuneCandidateRef.current;
+    if (c) {
+      tunePreviewing.current = true;
+      controller.preview(c, { autoplay: true, once: reducedMotion });
+    } else if (tunePreviewing.current) {
+      tunePreviewing.current = false;
+      controller.endPreview();
+    }
+  }, [controller, tuneKey, doc, reducedMotion]);
 
   const onStepDuration = (cutKey: string, requested: Frames) => {
     const r = setDuration(doc, cutKey, requested);
@@ -741,7 +848,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   // --- global shortcuts --------------------------------------------------------
 
   const hasTarget = targetCutKey !== null;
-  const shortcuts = { doUndo, doRedo, togglePlay, deleteSelected, leavePicker, select, doSplit, doInsert, markShownIn, markShownOut, onPresetDragEnd, selection, hasTarget, looping };
+  const shortcuts = { doUndo, doRedo, togglePlay, deleteSelected, leavePicker, select, doSplit, doInsert, markShownIn, markShownOut, onPresetDragEnd, selection, hasTarget, tuningId };
   const latest = useRef(shortcuts);
   useLayoutEffect(() => {
     latest.current = shortcuts;
@@ -773,7 +880,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       if (e.key === ' ') {
         e.preventDefault();
         if (!e.repeat) s.togglePlay();
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && s.selection) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && s.selection && !el?.closest('.tpopover')) {
         e.preventDefault();
         s.deleteSelected();
       } else if (e.key.toLowerCase() === 's' && !e.repeat) {
@@ -791,28 +898,13 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
         if (libDragRef.current) setLibDrag(null);
         else if (presetDragRef.current) s.onPresetDragEnd(false);
         else if (controller.isShowingSource) controller.endSource();
-        else if (s.looping) controller.endPreview();
+        else if (s.tuningId) setTuningId(null);
         else if (s.selection || s.hasTarget) s.select(null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [controller]);
-
-  // A press outside the transition popover closes it by deselecting the transition. The sidebar
-  // (presets swap it), the timeline bar (play, zoom, undo) and other transitions don't count.
-  const popoverOpen = selectedTransition !== null;
-  useEffect(() => {
-    if (!popoverOpen) return;
-    const onDown = (e: globalThis.PointerEvent) => {
-      const el = e.target as Element | null;
-      if (!el || sidebarEl.contains(el)) return;
-      if (el.closest('.tpopover, .transition-object, .timeline-bar, dialog')) return;
-      latest.current.select(null);
-    };
-    window.addEventListener('pointerdown', onDown, true);
-    return () => window.removeEventListener('pointerdown', onDown, true);
-  }, [popoverOpen, sidebarEl]);
 
   // --- render ----------------------------------------------------------------
 
@@ -827,7 +919,6 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
 
   const cutNumber = targetCut ? targetCut.index + 1 : 0;
   const cutLabel = targetCut ? `Cut ${cutNumber} · ${targetCut.from.label} → ${targetCut.to.label}` : null;
-  const selectedCut = selectedTransition ? cutByKey(doc, transitionCutKey(selectedTransition)) : null;
   const disabledReason =
     cutList.length === 0
       ? NO_CUTS
@@ -935,6 +1026,9 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
                 onApply={onApply}
                 onEscape={leavePicker}
                 onActiveChange={setPickerActive}
+                tuningId={tuningId}
+                onTune={toggleTuning}
+                onRemove={() => targetCut && removeTransitionAt(targetCut.key)}
               />
           </TransitionsPanel>
         )}
@@ -1104,21 +1198,32 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
           previewEl,
         )}
       {createPortal(<ThumbsContext.Provider value={thumbs}>{timeline}</ThumbsContext.Provider>, timelineEl)}
-      {selectedTransition && selectedCut && (
+      {tuningId && tab === 'transitions' && (
         <TransitionPopover
-          transition={selectedTransition}
-          anchor={() => transitionEls.get(selectedTransition.id) ?? null}
-          looping={looping}
-          headingRef={editHeadingRef}
-          fineTuneOpen={fineTuneOpen}
-          onFineTuneToggle={() => setFineTuneOpen((o) => !o)}
+          key={tuningId}
+          presetId={tuningId}
+          {...(tuningLive && targetTransition ? { tuning: targetTransition, duration: targetTransition.duration } : draftLook(tuningId))}
+          durationRange={durationRange}
+          onDurationInput={onDurationInput}
+          live={tuningLive}
+          note={
+            !targetCut
+              ? 'Pick a cut with + to preview it.'
+              : limits && !limits.canTransition
+                ? 'The clips at this cut are too short to preview it.'
+                : null
+          }
+          anchor={() => pickerListRef.current?.querySelector<HTMLElement>(`[data-preset="${tuningId}"] .preset-thumb`) ?? null}
+          opener={() => pickerListRef.current?.querySelector<HTMLElement>(`[data-preset="${tuningId}"] .preset-tune`) ?? null}
+          onClose={() => toggleTuning(tuningId)}
           onSliderPointerDown={onSliderPointerDown}
           onFeelInput={onFeelInput}
           onIntensityInput={onIntensityInput}
           onEasingPick={onEasingPick}
           onResetTuning={onResetTuning}
-          onRemove={() => removeTransitionAt(selectedCut.key)}
-          onToggleLoop={() => (looping ? controller.endPreview() : setLooping(true))}
+          onDurationReset={onDurationReset}
+          onFeelReset={onFeelReset}
+          onIntensityReset={onIntensityReset}
         />
       )}
       {libDrag &&

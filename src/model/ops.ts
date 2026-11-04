@@ -1,5 +1,5 @@
 import type { Bezier } from './easing';
-import { normalizeFeel, normalizeIntensity } from './feel';
+import { normalizeFeel, normalizeIntensity, type Tuning } from './feel';
 import {
   clampDuration,
   clipFromSource,
@@ -47,6 +47,16 @@ export interface ApplyOptions {
   readonly feel: number;
   /** Duration for a new transition, clamped to what the clips can give. Ignored when replacing. */
   readonly duration: Frames;
+  /**
+   * A look set up before applying (Feel plus any Fine-tune). When given it wins over
+   * `feel`, and a replacement takes it instead of keeping the old transition's look.
+   */
+  readonly look?: ApplyLook;
+}
+
+/** A look set up before applying: Feel, Fine-tune and, when it was changed, a duration. */
+export interface ApplyLook extends Tuning {
+  readonly duration?: Frames;
 }
 
 const withTransitions = (doc: Doc, transitions: readonly Transition[]): Doc => ({ ...doc, transitions });
@@ -92,6 +102,7 @@ function fitAtCut(doc: Doc, cut: Cut, duration: Frames): { doc: Doc; trimmed: Ro
  *   the clips can give, trimming them where their handles are short.
  * - A transition exists: swap the preset, keeping duration, feel and a Fine-tuned curve.
  *   A Fine-tuned intensity is dropped, since intensity means something else per preset.
+ *   With `options.look`, the replacement takes that look instead, and its duration when it has one.
  * - A clip too short to give even the minimum: refuse with the limits so the UI can explain.
  */
 export function applyTransition(
@@ -107,22 +118,28 @@ export function applyTransition(
 
   const existing = transitionAt(doc, cutKey);
   if (existing) {
-    const { duration, clamped } = clampDuration(existing.duration, limits);
-    if (existing.presetId === presetId && duration === existing.duration) {
+    const look = options.look;
+    const { duration, clamped } = clampDuration(look?.duration ?? existing.duration, limits);
+    if (existing.presetId === presetId && duration === existing.duration && !look) {
       return { ok: true, doc, replaced: false, clamped: null, transition: existing, trimmed: NO_ROOM };
     }
-    const next = { ...tuned(existing, existing.easing, undefined), presetId, duration };
+    const next = look
+      ? { ...tuned(existing, look.easing, look.intensity), presetId, duration, feel: normalizeFeel(look.feel) }
+      : { ...tuned(existing, existing.easing, undefined), presetId, duration };
+    // A longer drafted duration may need room the handles don't have.
+    const room = duration > existing.duration ? fitAtCut(doc, cut, duration) : { doc, trimmed: NO_ROOM };
     return {
       ok: true,
-      doc: replaceTransition(doc, existing, next),
+      doc: normalize(replaceTransition(room.doc, existing, next)),
       replaced: true,
       clamped,
       transition: next,
-      trimmed: NO_ROOM,
+      trimmed: room.trimmed,
     };
   }
 
-  const { duration, clamped } = clampDuration(options.duration, limits);
+  const look = options.look;
+  const { duration, clamped } = clampDuration(look?.duration ?? options.duration, limits);
   const room = fitAtCut(doc, cut, duration);
   const transition: Transition = {
     id: `t${doc.nextId}`,
@@ -130,7 +147,9 @@ export function applyTransition(
     toId: cut.to.id,
     presetId,
     duration,
-    feel: normalizeFeel(options.feel),
+    feel: normalizeFeel(look?.feel ?? options.feel),
+    ...(look?.easing !== undefined && { easing: look.easing }),
+    ...(look?.intensity !== undefined && { intensity: normalizeIntensity(look.intensity) }),
   };
   const base = room.doc;
   return {
@@ -200,6 +219,13 @@ export function resetTuning(doc: Doc, cutKey: string): Doc {
   const t = transitionAt(doc, cutKey);
   if (!t || (t.easing === undefined && t.intensity === undefined)) return doc;
   return replaceTransition(doc, t, tuned(t, undefined, undefined));
+}
+
+/** Drop only the Fine-tuned intensity, so Feel drives it again; a Fine-tuned curve stays. */
+export function clearIntensity(doc: Doc, cutKey: string): Doc {
+  const t = transitionAt(doc, cutKey);
+  if (!t || t.intensity === undefined) return doc;
+  return replaceTransition(doc, t, tuned(t, t.easing, undefined));
 }
 
 // ---------------------------------------------------------------------------

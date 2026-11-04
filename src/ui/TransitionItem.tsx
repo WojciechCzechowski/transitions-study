@@ -143,8 +143,7 @@ export function TransitionItem(props: Props) {
   };
 
   const name = getPreset(t.presetId).name;
-  // A selected transition shows its duration in the popover, which covers where the tooltip would be.
-  const showTooltip = !selected && (dragEdge !== null || edgeFocused !== null);
+  const showTooltip = dragEdge !== null || edgeFocused !== null;
   const reason = limitHit === 'max' ? describeLimit(cut, limits) : limitHit === 'min' ? describeMinimum(limits) : null;
 
   return (

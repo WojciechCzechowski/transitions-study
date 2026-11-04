@@ -901,6 +901,49 @@ h2[tabindex='-1']:focus-visible {
   background: var(--primary);
 }
 
+/* Buttons on a card's thumbnail: settings bottom-left (on hover, or always once applied), remove bottom-right. */
+.preset-action {
+  position: absolute;
+  bottom: 6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.preset-action:hover {
+  border-color: var(--border-strong);
+}
+
+.preset-tune {
+  left: 6px;
+  opacity: 0;
+  transition: opacity 100ms;
+}
+
+.preset:hover .preset-tune,
+.preset:focus-within .preset-tune,
+.preset.applied .preset-tune,
+.preset.tuning .preset-tune {
+  opacity: 1;
+}
+
+.preset-tune[aria-expanded='true'] {
+  color: var(--primary);
+  border-color: var(--select);
+}
+
+.preset-remove {
+  right: 6px;
+  color: var(--danger);
+}
+
 .preset-name {
   font-size: 13px;
   font-weight: 500;
@@ -1305,7 +1348,7 @@ button.source-pill:hover {
 
 /* --- transition popover --------------------------------------------------- */
 
-/* Floats over the selected transition's midpoint, a few px above the clips. */
+/* Hangs from a preset card's thumbnail: below it, or above when the window has no room. */
 .tpopover {
   position: fixed;
   z-index: 50;
@@ -1320,7 +1363,7 @@ button.source-pill:hover {
   box-shadow: var(--shadow-pop);
 }
 
-/* Arrow pointing down at the midpoint. */
+/* Arrow pointing at the card: down from above it, up from below it. */
 .tpopover::after {
   content: '';
   position: absolute;
@@ -1333,6 +1376,19 @@ button.source-pill:hover {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   transform: rotate(45deg);
+}
+
+.tpopover.below::after {
+  top: 0;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+
+.tpopover-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .tpopover-head {
@@ -1443,19 +1499,6 @@ button.source-pill:hover {
   border: 0;
 }
 
-.tpopover-actions-start {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.tpopover-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .tpopover-feel {
   display: flex;
   flex-direction: column;
@@ -1490,21 +1533,13 @@ button.source-pill:hover {
   cursor: pointer;
 }
 
-/* Fine-tune: a second popover over the Feel area, rising from the actions row. */
-.tune-pop {
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: calc(12px + 30px + 6px);
-  z-index: 1;
+/* Fine-tune: always shown under Feel, set apart by a rule. */
+.tune-section {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px 12px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 .tune-head {

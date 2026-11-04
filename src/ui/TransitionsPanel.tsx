@@ -11,8 +11,9 @@ interface Props {
 }
 
 /**
- * The Transitions tab: the preset gallery, acting on one cut. The selected
- * transition's adjustments live in the popover over it on the timeline.
+ * The Transitions tab: the preset gallery, acting on one cut. Each card's settings
+ * button opens Feel and Fine-tune for it: the applied transition's, or a draft
+ * the next apply uses.
  */
 export function TransitionsPanel({ canDragPresets, cutLabel, children }: Props) {
   const headingId = useId();
@@ -35,7 +36,9 @@ export function TransitionsPanel({ canDragPresets, cutLabel, children }: Props) 
           <p className="help-pop-note">
             Click + between two clips to pick a cut, then click a preset to apply it.
             {canDragPresets && ' Or drag a preset straight onto any cut.'} Hovering a preset previews it at the cut,
-            unless Preview on hover is off. Picking another preset for a transition keeps its Duration and Feel.
+            unless Preview on hover is off. The settings button on a card sets its Feel and Fine-tune, previewed at the
+            cut, before or after applying it. Picking another preset for a transition keeps its Duration, and keeps
+            its Feel unless that preset has settings of its own.
           </p>
         </HelpPopover>
       </header>

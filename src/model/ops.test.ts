@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { cutAt, generous, makeDoc, noHandleB, shortB, SOURCES, tooShortB } from './fixtures';
 import {
   applyTransition,
+  clearIntensity,
   deleteClip,
   insertAtFrame,
   insertClip,
@@ -28,6 +29,17 @@ function applied(doc: Doc, presetId = 'push', feel = 50, n = 0): Doc {
 
 const only = (doc: Doc) => doc.transitions[0];
 
+describe('clearIntensity', () => {
+  it('drops the Fine-tuned intensity and keeps the curve', () => {
+    const r = applyTransition(shortB(), 'c1|c2', 'blur', { feel: 50, duration: 24, look: { feel: 30, easing: [0, 0, 1, 1], intensity: 0.8 } });
+    if (!r.ok) throw new Error();
+    const t = only(clearIntensity(r.doc, 'c1|c2'));
+    expect(t?.intensity).toBeUndefined();
+    expect(t?.easing).toEqual([0, 0, 1, 1]);
+    expect(t?.feel).toBe(30);
+  });
+});
+
 describe('applyTransition', () => {
   it('creates one transition centred on the cut at the requested duration', () => {
     const doc = shortB();
@@ -41,6 +53,35 @@ describe('applyTransition', () => {
     expect(r.replaced).toBe(false);
     expect(r.doc.nextId).toBe(4);
     expect(doc.transitions).toHaveLength(0);
+  });
+
+  it('takes a drafted look for a new transition', () => {
+    const doc = shortB();
+    const r = applyTransition(doc, 'c1|c2', 'blur', { feel: 50, duration: 24, look: { feel: 20, easing: [0, 0, 1, 1], intensity: 0.7 } });
+    if (!r.ok) throw new Error();
+    expect(only(r.doc)).toMatchObject({ presetId: 'blur', duration: 24, feel: 20, easing: [0, 0, 1, 1], intensity: 0.7 });
+  });
+
+  it('a drafted look replaces the old look but keeps the duration', () => {
+    const doc = shortB();
+    const first = applyTransition(doc, 'c1|c2', 'push', { feel: 50, duration: 30 });
+    if (!first.ok) throw new Error();
+    const tunedPush = setIntensity(first.doc, 'c1|c2', 0.4);
+    const r = applyTransition(tunedPush, 'c1|c2', 'zoom', { feel: 50, duration: 24, look: { feel: 90 } });
+    if (!r.ok) throw new Error();
+    expect(only(r.doc)).toMatchObject({ presetId: 'zoom', duration: 30, feel: 90 });
+    expect(only(r.doc)?.intensity).toBeUndefined();
+  });
+
+  it('a drafted duration wins, for a new transition and a replacement', () => {
+    const doc = shortB();
+    const first = applyTransition(doc, 'c1|c2', 'push', { feel: 50, duration: 24, look: { feel: 50, duration: 30 } });
+    if (!first.ok) throw new Error();
+    expect(only(first.doc)?.duration).toBe(30);
+    const r = applyTransition(first.doc, 'c1|c2', 'wipe', { feel: 50, duration: 24, look: { feel: 50, duration: 40 } });
+    if (!r.ok) throw new Error();
+    expect(only(r.doc)).toMatchObject({ presetId: 'wipe', duration: 40 });
+    expect(r.trimmed).toEqual({ a: 0, b: 2 }); // B head is 18: 2 short of half of 40
   });
 
   it('trims nothing when the handles are enough', () => {
