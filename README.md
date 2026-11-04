@@ -25,11 +25,11 @@ Library order follows the order given (a folder is sorted by name), the starting
 
 The demo uses three videos from [Pexels](https://www.pexels.com), free to use under the [Pexels license](https://www.pexels.com/license/) (attribution optional, given here anyway). They were downloaded on 2026-11-04 and re-encoded with `clips:normalize` (1280×720, 30 fps, no audio). The files are not in this repo.
 
-| Clip | Pexels video |
-| --- | --- |
-| A | [14146272](https://www.pexels.com/video/14146272/) |
-| B | [14863901](https://www.pexels.com/video/14863901/) |
-| C | [15826401](https://www.pexels.com/video/15826401/) |
+| Clip | Pexels video | Author |
+| --- | --- | --- |
+| A | [14146272](https://www.pexels.com/video/14146272/) | [Eclipse Chasers](https://www.pexels.com/@eclipse-chasers-716719984) |
+| B | [14863901](https://www.pexels.com/video/14863901/) | [Michal Petráš](https://www.pexels.com/@michal-petras-2152077115) |
+| C | [15826401](https://www.pexels.com/video/15826401/) | [Michal Petráš](https://www.pexels.com/@michal-petras-2152077115) |
 
 ## Deploying
 
