@@ -154,6 +154,10 @@ export function Timeline(props: Props) {
   const onRulerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    // Focus from a click: a global shortcut (S, W…) pressed next would otherwise
+    // flip the browser's :focus-visible on and draw the ring. Cleared by the
+    // ruler's own keys or on blur.
+    e.currentTarget.dataset.pointerFocus = '';
     scrubbing.current = true;
     props.onScrubStart();
     props.onScrub(frameAt(e.clientX));
@@ -182,6 +186,7 @@ export function Timeline(props: Props) {
                   : null;
     if (next === null) return;
     e.preventDefault();
+    delete (e.currentTarget as HTMLElement).dataset.pointerFocus;
     props.onScrubStart();
     props.onScrub(clamp(next, 0, Math.max(0, len - 1)));
   };
@@ -409,6 +414,7 @@ export function Timeline(props: Props) {
             onPointerUp={onRulerUp}
             onPointerCancel={onRulerUp}
             onKeyDown={onRulerKey}
+            onBlur={(e) => delete e.currentTarget.dataset.pointerFocus}
           >
             {ticks.map(({ f, major: isMajor }) => (
               <div key={f} className={`tick${isMajor ? ' major' : ''}`} style={{ left: x(f) }}>

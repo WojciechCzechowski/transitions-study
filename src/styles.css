@@ -1725,6 +1725,12 @@ button.source-pill:hover {
   border-top: 1px solid var(--border);
 }
 
+/* Clicked, not keyboard-driven: no ring until the ruler's own keys move the playhead. */
+.ruler[data-pointer-focus]:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 /* Scrubbing drags across these; keep it from selecting their text. */
 .ruler,
 .track-header-ruler,
