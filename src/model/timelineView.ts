@@ -57,13 +57,15 @@ export function tickStep(pxPerFrame: number, minLabelPx = 64): { major: Frames; 
   return STEPS[STEPS.length - 1]!;
 }
 
-/** "0:05" on whole seconds, "0:05:12" otherwise. */
-export function rulerLabel(f: Frames): string {
+/**
+ * Ruler label in one format per zoom level: "0:05" when the major step is whole
+ * seconds, "0:05:00" / "0:05:10" (with frames) on every label when it's finer.
+ */
+export function rulerLabel(f: Frames, majorStep: Frames): string {
   const total = Math.floor(f / FPS);
   const m = Math.floor(total / 60);
   const s = String(total % 60).padStart(2, '0');
-  const rest = f % FPS;
-  return rest === 0 ? `${m}:${s}` : `${m}:${s}:${String(rest).padStart(2, '0')}`;
+  return majorStep % FPS === 0 ? `${m}:${s}` : `${m}:${s}:${String(f % FPS).padStart(2, '0')}`;
 }
 
 export const ZOOM = { minPxPerFrame: 0.25, maxPxPerFrame: 24 } as const;

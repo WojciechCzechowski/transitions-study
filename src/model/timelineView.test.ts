@@ -66,9 +66,12 @@ describe('ruler', () => {
   });
 
   it('labels seconds and frames', () => {
-    expect(rulerLabel(0)).toBe('0:00');
-    expect(rulerLabel(150)).toBe('0:05');
-    expect(rulerLabel(1805)).toBe('1:00:05');
+    expect(rulerLabel(0, 30)).toBe('0:00');
+    expect(rulerLabel(150, 150)).toBe('0:05');
+    expect(rulerLabel(1800, 300)).toBe('1:00');
+    // Sub-second steps put frames on every label, whole seconds included.
+    expect(rulerLabel(30, 10)).toBe('0:01:00');
+    expect(rulerLabel(1805, 5)).toBe('1:00:05');
   });
 });
 

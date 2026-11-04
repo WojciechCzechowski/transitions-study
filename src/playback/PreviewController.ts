@@ -11,7 +11,7 @@ import type { FrameStore } from '../media/FrameStore';
 import { cubicBezier, type Bezier } from '../model/easing';
 import { tuningParams } from '../model/feel';
 import { loopFrameAt, loopRange, onceFrameAt, rebaseElapsed, type LoopRange } from '../model/previewLoop';
-import { clipStarts, cutByKey, resolveFrame, timelineLength, visibleLength, type Doc, type FrameRef, type TransitionOverride } from '../model/timeline';
+import { clipStarts, cutByKey, resolveFrame, timelineLength, visibleLength, type Doc, type TransitionOverride } from '../model/timeline';
 import { clamp, FPS, type Frames } from '../model/time';
 import type { Renderer } from '../render/Renderer';
 
@@ -25,33 +25,16 @@ export interface PreviewCandidate {
   readonly intensity?: number;
 }
 
-export interface FrameInfo {
-  readonly mode: 'timeline' | 'preview';
-  readonly t: Frames;
-  readonly presetId?: string;
-  /** Source frame drawn outside a transition. */
-  readonly source?: FrameRef;
-  /** Source frames drawn inside a transition. */
-  readonly from?: FrameRef;
-  readonly to?: FrameRef;
-  readonly linear?: number;
-  readonly eased?: number;
-  /** False when a requested frame was not decoded and a neighbour was drawn. */
-  readonly exact: boolean;
-}
-
 export interface ControllerCallbacks {
   onPlayhead(frame: Frames): void;
   onPlayingChange(playing: boolean): void;
   onPreviewChange(state: { active: boolean; playing: boolean }): void;
-  onFrameInfo(info: FrameInfo): void;
 }
 
 const NOOP_CALLBACKS: ControllerCallbacks = {
   onPlayhead: () => {},
   onPlayingChange: () => {},
   onPreviewChange: () => {},
-  onFrameInfo: () => {},
 };
 
 type Mode =
@@ -318,8 +301,6 @@ export class PreviewController {
       ? { cutKey: m.candidate.cutKey, look: m.candidate }
       : undefined;
     const r = resolveFrame(doc, t, override);
-    const mode = isPreview ? 'preview' : 'timeline';
-    const presetId = isPreview ? m.candidate.presetId : undefined;
 
     if (r.kind === 'single') {
       const look = this.store.get(r.source.sourceId, r.source.frame);
@@ -329,7 +310,6 @@ export class PreviewController {
         renderer.drawSingle(look.bitmap);
         this.lastKey = key;
       }
-      this.cb.onFrameInfo({ mode, t: r.t, source: { sourceId: r.source.sourceId, frame: look.frame }, exact: look.exact, presetId });
       return;
     }
 
@@ -352,15 +332,5 @@ export class PreviewController {
       });
       this.lastKey = key;
     }
-    this.cb.onFrameInfo({
-      mode,
-      t: r.t,
-      presetId: preset.id,
-      from: { sourceId: r.from.sourceId, frame: from.frame },
-      to: { sourceId: r.to.sourceId, frame: to.frame },
-      linear: r.linear,
-      eased,
-      exact: from.exact && to.exact,
-    });
   }
 }

@@ -11,6 +11,12 @@
   --slider-handle: #b8b8b8;
   --text: #111111;
   --muted: #6b6b6b;
+  /* Lighter than muted: ruler labels, the total duration, frame digits. */
+  --faint: #8c8c8c;
+  --ruler-h: 24px;
+  --ruler-label-top: 9px;
+  /* Smallest space above and below the V1 lane once the pane is short. */
+  --lane-min-gap: 16px;
   --primary: #111111;
   --on-primary: #ffffff;
   --select: #111111;
@@ -60,7 +66,6 @@ p {
 code,
 kbd,
 .timecode,
-.frame-readout,
 .track-header-ruler {
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
@@ -1162,7 +1167,7 @@ h2[tabindex='-1']:focus-visible {
   align-items: center;
   gap: 16px;
   height: 52px;
-  padding: 0 16px;
+  padding: 0 16px 5px;
 }
 
 .bar-left,
@@ -1186,25 +1191,23 @@ h2[tabindex='-1']:focus-visible {
 }
 
 .timecode {
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 400;
   white-space: nowrap;
 }
 
-.frame-readout {
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
+.timecode-total {
+  color: var(--faint);
 }
+
 
 .timeline {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
-  align-items: start;
+  grid-template-columns: 72px minmax(0, 1fr);
+  /* Both columns fill the pane's height, so the lane can centre and the playhead runs to the bottom. */
+  align-items: stretch;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -1213,74 +1216,102 @@ h2[tabindex='-1']:focus-visible {
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: 12px;
+  display: flex;
+  flex-direction: column;
 }
 
 .track-headers {
   display: flex;
   flex-direction: column;
+  border-right: 1px solid var(--border);
 }
 
-.track-header-ruler {
-  height: 30px;
+/* Below the ruler: the lane sits in the middle, with space above and below that shrinks with the pane. */
+.lane-area {
+  flex: 1 0 auto;
   display: flex;
-  align-items: flex-end;
-  padding: 0 0 8px 12px;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--lane-min-gap) 0;
+}
+
+/* Gutter beside the ruler: the playhead timecode, on the same line as the ruler labels. */
+.track-header-ruler {
+  height: var(--ruler-h);
+  padding: var(--ruler-label-top) 10px 0 12px;
   font-size: 10px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
+  line-height: 12px;
+  white-space: nowrap;
+  color: var(--text);
+  border-top: 1px solid var(--border);
+}
+
+.track-header-ruler .muted {
+  color: var(--faint);
 }
 
 .track-header {
   height: 112px;
-  margin-top: 4px;
   display: flex;
   align-items: center;
-  padding-left: 16px;
+  justify-content: center;
+  padding: 6px;
   font-size: 12px;
   font-weight: 500;
   color: var(--muted);
-  border-right: 1px solid var(--border);
 }
 
 .timeline-inner {
   position: relative;
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
 }
 
+/* A thin strip: faint ticks hang from the top edge, labels sit low, right of each major tick. */
 .ruler {
   position: relative;
-  height: 30px;
+  height: var(--ruler-h);
   cursor: ew-resize;
   touch-action: none;
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+
+/* Scrubbing drags across these; keep it from selecting their text. */
+.ruler,
+.track-header-ruler,
+.playhead {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .tick {
   position: absolute;
-  bottom: 0;
+  top: 0;
   width: 1px;
   height: 4px;
   background: var(--border-strong);
 }
 
 .tick.major {
-  height: 10px;
-  background: var(--muted);
+  height: 7px;
 }
 
 .tick span {
   position: absolute;
-  bottom: 12px;
+  /* From the tick's top (the ruler's content top), matching the gutter's padding. */
+  top: var(--ruler-label-top);
   left: 4px;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 10px;
+  line-height: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
   white-space: nowrap;
 }
 
 .track {
   position: relative;
   height: 112px;
-  margin-top: 4px;
 }
 
 .cut-layer {
@@ -1801,24 +1832,33 @@ h2[tabindex='-1']:focus-visible {
   color: var(--warn);
 }
 
+/* A thin line through every track, with a pill showing the time at the top of the ruler. */
 .playhead {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 2px;
-  margin-left: -1px;
+  width: 1px;
   background: var(--playhead);
   pointer-events: none;
   z-index: 4;
 }
 
-.playhead::before {
-  content: '';
+.playhead-label {
   position: absolute;
-  top: 0;
-  left: -4px;
-  border: 5px solid transparent;
-  border-top: 7px solid var(--playhead);
+  top: 3px;
+  left: 0.5px;
+  /* Centred on the line, but never pushed past the start of the timeline. */
+  transform: translateX(max(-50%, calc(-1 * var(--playhead-x, 0px))));
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--playhead);
+  color: var(--on-primary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

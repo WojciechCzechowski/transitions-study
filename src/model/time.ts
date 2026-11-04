@@ -50,6 +50,12 @@ export function formatTimecode(f: Frames): string {
   return `${sign}${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
 }
 
+/** "0:56", "12:04" — minutes : seconds, frames dropped. For the toolbar clock and the playhead. */
+export function formatClock(f: Frames): string {
+  const totalSeconds = Math.floor(Math.max(0, f) / FPS);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
+}
+
 export function clamp(n: number, lo: number, hi: number): number {
   return n < lo ? lo : n > hi ? hi : n;
 }

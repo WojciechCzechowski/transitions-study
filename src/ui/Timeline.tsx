@@ -1,4 +1,14 @@
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from 'react';
+import {
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type Ref,
+} from 'react';
 import { getPreset } from '../config/transitions.config';
 import { trimClip, trimLimitTransition, type TrimEdge, type TrimResult } from '../model/ops';
 import {
@@ -12,7 +22,7 @@ import {
   type Doc,
 } from '../model/timeline';
 import { boundaryFrame, cutAtFrame, insertionIndex, rulerLabel, tickStep } from '../model/timelineView';
-import { clamp, FPS, formatTimecode, type Frames } from '../model/time';
+import { clamp, formatClock, FPS, formatTimecode, type Frames } from '../model/time';
 import { ClipItem, trimLimitText, type TrimFeedback } from './ClipItem';
 import { CutZone } from './CutZone';
 import { useElementWidth } from './hooks';
@@ -277,6 +287,8 @@ export function Timeline(props: Props) {
   }
 
   const markerIndex = move ? move.index : props.dropIndex;
+  /** "00:02:08": the seconds part reads dark, the frames part muted. */
+  const gutterTime = formatTimecode(playhead);
   const trimFeedbackFor = (clipId: string): TrimFeedback | null => {
     if (trimLive?.clipId === clipId) return trimLive;
     if (trimFocus?.clipId === clipId) {
@@ -289,8 +301,13 @@ export function Timeline(props: Props) {
   return (
     <div className="timeline">
       <div className="track-headers" aria-hidden="true">
-        <div className="track-header-ruler">{formatTimecode(playhead)}</div>
-        <div className="track-header">V1</div>
+        <div className="track-header-ruler">
+          {gutterTime.slice(0, -3)}
+          <span className="muted">{gutterTime.slice(-3)}</span>
+        </div>
+        <div className="lane-area">
+          <div className="track-header">V1</div>
+        </div>
       </div>
       <div
         className="timeline-scroll"
@@ -317,139 +334,153 @@ export function Timeline(props: Props) {
           >
             {ticks.map(({ f, major: isMajor }) => (
               <div key={f} className={`tick${isMajor ? ' major' : ''}`} style={{ left: x(f) }}>
-                {isMajor && <span>{rulerLabel(f)}</span>}
+                {isMajor && f > 0 && <span>{rulerLabel(f, major)}</span>}
               </div>
             ))}
           </div>
 
+          {/* Space around the lane: clicking it deselects, like the lane's own empty space. */}
           <div
-            className="track"
-            role="group"
-            aria-label="Video track V1"
+            className="lane-area"
             onPointerDown={(e) => {
               if (e.target === e.currentTarget) props.onSelect(null);
             }}
           >
-            {doc.clips.map((clip, i) => (
-              <ClipItem
-                key={clip.id}
-                clip={clip}
-                index={i}
-                left={x(starts[i]!)}
-                width={x(visibleLength(clip))}
-                tone={props.sourceTone(clip.sourceId)}
-                selected={selection?.kind === 'clip' && selection.id === clip.id}
-                trim={trimFeedbackFor(clip.id)}
-                ppf={ppf}
-                onSelect={() => props.onSelect({ kind: 'clip', id: clip.id })}
-                onMoveStart={onMoveStart}
-                onMove={onMove}
-                onMoveEnd={onMoveEnd}
-                onNudge={props.onNudgeClip}
-                onTrimStart={onTrimStart}
-                onTrimMove={onTrimMove}
-                onTrimEnd={onTrimEnd}
-                onTrimStep={onTrimStep}
-                onTrimFocus={(clipId, edge) => {
-                  if (!edge) setTrimFocus((f) => (f?.clipId === clipId ? null : f));
-                }}
-              />
-            ))}
+            <div
+              className="track"
+              role="group"
+              aria-label="Video track V1"
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) props.onSelect(null);
+              }}
+            >
+              {doc.clips.map((clip, i) => (
+                <ClipItem
+                  key={clip.id}
+                  clip={clip}
+                  index={i}
+                  left={x(starts[i]!)}
+                  width={x(visibleLength(clip))}
+                  tone={props.sourceTone(clip.sourceId)}
+                  selected={selection?.kind === 'clip' && selection.id === clip.id}
+                  trim={trimFeedbackFor(clip.id)}
+                  ppf={ppf}
+                  onSelect={() => props.onSelect({ kind: 'clip', id: clip.id })}
+                  onMoveStart={onMoveStart}
+                  onMove={onMove}
+                  onMoveEnd={onMoveEnd}
+                  onNudge={props.onNudgeClip}
+                  onTrimStart={onTrimStart}
+                  onTrimMove={onTrimMove}
+                  onTrimEnd={onTrimEnd}
+                  onTrimStep={onTrimStep}
+                  onTrimFocus={(clipId, edge) => {
+                    if (!edge) setTrimFocus((f) => (f?.clipId === clipId ? null : f));
+                  }}
+                />
+              ))}
 
-            {cutList.map((cut) => {
-              const t = transitionAt(doc, cut.key);
-              const limits = getLimits(doc, cut);
-              const dropHere = props.dropCutKey === cut.key;
-              const showStrips =
-                dropHere ||
-                hoverCut === cut.key ||
-                focusCut === cut.key ||
-                engagedCut === cut.key ||
-                (pickerActive && targetCutKey === cut.key);
-              const aTail = limits.available.aTail;
-              const bHead = limits.available.bHead;
-              const half = t ? t.duration / 2 : 0;
-              return (
-                <div
-                  key={cut.key}
-                  className={`cut-layer${dropHere ? (props.dropCutValid ? ' drop-target' : ' drop-invalid') : ''}`}
-                >
-                  {showStrips && (
-                    <>
-                      <div
-                        className={`handle-strip strip-a${aTail === 0 ? ' empty' : ''}`}
-                        style={{ left: x(cut.frame), width: Math.max(2, x(Math.min(aTail, len - cut.frame))) }}
-                      >
-                        <span>
-                          {cut.from.label} tail · {aTail} f
-                        </span>
-                      </div>
-                      <div
-                        className={`handle-strip strip-b${bHead === 0 ? ' empty' : ''}`}
-                        style={{ left: x(cut.frame - Math.min(bHead, cut.frame)), width: Math.max(2, x(Math.min(bHead, cut.frame))) }}
-                      >
-                        <span>
-                          {cut.to.label} head · {bHead} f
-                        </span>
-                      </div>
-                    </>
-                  )}
-                  {t ? (
-                    <TransitionItem
-                      doc={doc}
-                      cut={cut}
-                      transition={t}
-                      limits={limits}
-                      ppf={ppf}
-                      left={x(cut.frame - half)}
-                      width={x(t.duration)}
-                      selected={selection?.kind === 'transition' && selection.id === t.id}
-                      bodyRef={(el) => {
-                        if (el) props.transitionEls.set(t.id, el);
-                        else props.transitionEls.delete(t.id);
-                      }}
-                      gesture={props.gesture}
-                      onSelect={() => props.onSelect({ kind: 'transition', id: t.id })}
-                      onGestureActive={freeze}
-                      onEngaged={(on) => setEngagedCut((k) => (on ? cut.key : k === cut.key ? null : k))}
-                      onStepDuration={(requested) => props.onStepDuration(cut.key, requested)}
-                      announce={props.announce}
-                    />
-                  ) : (
-                    <>
-                      {props.pendingCutKey === cut.key && (
+              {cutList.map((cut) => {
+                const t = transitionAt(doc, cut.key);
+                const limits = getLimits(doc, cut);
+                const dropHere = props.dropCutKey === cut.key;
+                const showStrips =
+                  dropHere ||
+                  hoverCut === cut.key ||
+                  focusCut === cut.key ||
+                  engagedCut === cut.key ||
+                  (pickerActive && targetCutKey === cut.key);
+                const aTail = limits.available.aTail;
+                const bHead = limits.available.bHead;
+                const half = t ? t.duration / 2 : 0;
+                return (
+                  <div
+                    key={cut.key}
+                    className={`cut-layer${dropHere ? (props.dropCutValid ? ' drop-target' : ' drop-invalid') : ''}`}
+                  >
+                    {showStrips && (
+                      <>
                         <div
-                          className="transition-slot"
-                          style={{ left: x(cut.frame), width: x(PENDING_SLOT_FRAMES) }}
-                          aria-hidden="true"
-                        />
-                      )}
-                      <CutZone
+                          className={`handle-strip strip-a${aTail === 0 ? ' empty' : ''}`}
+                          style={{ left: x(cut.frame), width: Math.max(2, x(Math.min(aTail, len - cut.frame))) }}
+                        >
+                          <span>
+                            {cut.from.label} tail · {aTail} f
+                          </span>
+                        </div>
+                        <div
+                          className={`handle-strip strip-b${bHead === 0 ? ' empty' : ''}`}
+                          style={{ left: x(cut.frame - Math.min(bHead, cut.frame)), width: Math.max(2, x(Math.min(bHead, cut.frame))) }}
+                        >
+                          <span>
+                            {cut.to.label} head · {bHead} f
+                          </span>
+                        </div>
+                      </>
+                    )}
+                    {t ? (
+                      <TransitionItem
+                        doc={doc}
                         cut={cut}
-                        left={x(cut.frame)}
-                        ready={ready}
-                        engaged={(pickerActive && targetCutKey === cut.key) || (dropHere && props.dropCutValid)}
-                        pickerId={props.pickerId}
-                        buttonRef={(el) => {
-                          if (el) props.cutEls.set(cut.key, el);
-                          else props.cutEls.delete(cut.key);
+                        transition={t}
+                        limits={limits}
+                        ppf={ppf}
+                        left={x(cut.frame - half)}
+                        width={x(t.duration)}
+                        selected={selection?.kind === 'transition' && selection.id === t.id}
+                        bodyRef={(el) => {
+                          if (el) props.transitionEls.set(t.id, el);
+                          else props.transitionEls.delete(t.id);
                         }}
-                        onHover={(on) => setHoverCut((k) => (on ? cut.key : k === cut.key ? null : k))}
-                        onFocusChange={(on) => setFocusCut((k) => (on ? cut.key : k === cut.key ? null : k))}
-                        onChoose={() => props.onChooseAtCut(cut.key)}
+                        gesture={props.gesture}
+                        onSelect={() => props.onSelect({ kind: 'transition', id: t.id })}
+                        onGestureActive={freeze}
+                        onEngaged={(on) => setEngagedCut((k) => (on ? cut.key : k === cut.key ? null : k))}
+                        onStepDuration={(requested) => props.onStepDuration(cut.key, requested)}
+                        announce={props.announce}
                       />
-                    </>
-                  )}
-                </div>
-              );
-            })}
+                    ) : (
+                      <>
+                        {props.pendingCutKey === cut.key && (
+                          <div
+                            className="transition-slot"
+                            style={{ left: x(cut.frame), width: x(PENDING_SLOT_FRAMES) }}
+                            aria-hidden="true"
+                          />
+                        )}
+                        <CutZone
+                          cut={cut}
+                          left={x(cut.frame)}
+                          ready={ready}
+                          engaged={(pickerActive && targetCutKey === cut.key) || (dropHere && props.dropCutValid)}
+                          pickerId={props.pickerId}
+                          buttonRef={(el) => {
+                            if (el) props.cutEls.set(cut.key, el);
+                            else props.cutEls.delete(cut.key);
+                          }}
+                          onHover={(on) => setHoverCut((k) => (on ? cut.key : k === cut.key ? null : k))}
+                          onFocusChange={(on) => setFocusCut((k) => (on ? cut.key : k === cut.key ? null : k))}
+                          onChoose={() => props.onChooseAtCut(cut.key)}
+                        />
+                      </>
+                    )}
+                  </div>
+                );
+              })}
 
-            {markerIndex !== null && (
-              <div className="insert-marker" style={{ left: x(boundaryFrame(doc, markerIndex)) }} aria-hidden="true" />
-            )}
+              {markerIndex !== null && (
+                <div className="insert-marker" style={{ left: x(boundaryFrame(doc, markerIndex)) }} aria-hidden="true" />
+              )}
+            </div>
           </div>
 
-          <div className="playhead" style={{ left: x(playhead) }} aria-hidden="true" />
+          <div
+            className="playhead"
+            style={{ left: x(playhead), '--playhead-x': `${x(playhead)}px` } as CSSProperties}
+            aria-hidden="true"
+          >
+            <span className="playhead-label">{formatClock(playhead)}</span>
+          </div>
         </div>
       </div>
     </div>

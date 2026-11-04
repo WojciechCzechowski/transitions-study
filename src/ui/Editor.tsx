@@ -50,12 +50,11 @@ import {
   transitionCutKey,
   type Cut,
   type Doc,
-  type FrameRef,
   type Source,
 } from '../model/timeline';
 import { clampZoom, fitScale, insertionIndex, sliderToZoom, zoomToSlider } from '../model/timelineView';
-import { formatDuration, formatTimecode, type Frames } from '../model/time';
-import type { FrameInfo, PreviewCandidate, PreviewController } from '../playback/PreviewController';
+import { formatClock, formatDuration, formatTimecode, type Frames } from '../model/time';
+import type { PreviewCandidate, PreviewController } from '../playback/PreviewController';
 import { Gallery } from './Gallery';
 import { isMac, isTextEntry, modKey } from './hooks';
 import { LibraryPanel } from './LibraryPanel';
@@ -92,7 +91,6 @@ interface PresetDrag {
 }
 
 const TAB_KEY = 'transition-study.tab';
-const pad3 = (n: number) => String(n).padStart(3, '0');
 
 function readTab(): Tab {
   try {
@@ -141,7 +139,6 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
   const [presetDrag, setPresetDrag] = useState<PresetDrag | null>(null);
   const [, setFocusTick] = useState(0);
 
-  const readoutRef = useRef<HTMLOutputElement>(null);
   const pickerListRef = useRef<HTMLDivElement>(null);
   const editHeadingRef = useRef<HTMLHeadingElement>(null);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ library: null, transitions: null });
@@ -184,22 +181,6 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
 
   // --- controller wiring -------------------------------------------------------
 
-  const formatInfo = useCallback(
-    (info: FrameInfo): string => {
-      const ref = (r: FrameRef) => `${sourceLabel(r.sourceId)} src ${pad3(r.frame)}`;
-      const parts: string[] = [];
-      parts.push(info.mode === 'preview' && info.presetId ? `Preview · ${getPreset(info.presetId).name}` : 'Timeline');
-      parts.push(`T ${formatTimecode(info.t)} (f${info.t})`);
-      if (info.source) parts.push(ref(info.source));
-      if (info.from) parts.push(ref(info.from));
-      if (info.to) parts.push(ref(info.to));
-      if (info.linear !== undefined && info.eased !== undefined) parts.push(`p ${info.linear.toFixed(2)} → ${info.eased.toFixed(2)}`);
-      if (!info.exact) parts.push('≈ nearest decoded frame');
-      return parts.join(' · ');
-    },
-    [sourceLabel],
-  );
-
   useLayoutEffect(() => {
     controller.setCallbacks({
       onPlayhead: setPlayhead,
@@ -211,12 +192,9 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
           setLooping(false);
         }
       },
-      onFrameInfo: (info) => {
-        if (readoutRef.current) readoutRef.current.textContent = formatInfo(info);
-      },
     });
     return () => controller.setCallbacks(null);
-  }, [controller, formatInfo]);
+  }, [controller]);
 
   useLayoutEffect(() => controller.setDoc(doc), [controller, doc]);
   useLayoutEffect(() => controller.setPlayhead(playhead), [controller, playhead]);
@@ -812,7 +790,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
       <div className="timeline-bar">
         <div className="bar-left">
           <span className="timecode">
-            {formatTimecode(playhead)} <span className="muted">f{playhead}</span>
+            {formatClock(playhead)} <span className="timecode-total">/ {formatClock(len)}</span>
           </span>
           <span className="bar-divider" aria-hidden="true" />
           <button
@@ -863,9 +841,12 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
           <span aria-hidden="true">{playing ? <Pause size={SMALL_ICON}/> : <Play size={SMALL_ICON}/>}</span>
         </button>
         <div className="bar-right">
-          {reducedMotion && <span className="badge">Reduced motion: previews play on request</span>}
-          <output ref={readoutRef} className="frame-readout" />
-          <span className="bar-divider" aria-hidden="true" />
+          {reducedMotion && (
+            <>
+              <span className="badge">Reduced motion: previews play on request</span>
+              <span className="bar-divider" aria-hidden="true" />
+            </>
+          )}
           <div className="zoom" role="group" aria-label="Timeline zoom">
             <button type="button" className="btn-icon" onClick={() => setZoom(clampZoom(ppf / 1.25))} aria-label="Zoom out" data-tip="Zoom out">
               <Minus size={SMALL_ICON} aria-hidden="true" />
