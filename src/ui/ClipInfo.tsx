@@ -71,7 +71,7 @@ export function ClipInfo({ clip, length }: { clip: Clip; length: Frames }) {
             </span>
             <span className="clip-info-row">
               <FileText size={14} />
-              {clip.label}
+              <span className="clip-info-name">{clip.label}</span>
             </span>
             <span className="clip-info-row">
               <Clock size={14} />

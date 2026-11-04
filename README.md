@@ -10,11 +10,14 @@ npm run clips      # generate the two synthetic clips into public/clips (needs f
 npm run dev
 ```
 
-To use your own footage instead (30 fps CFR, 960×540, short GOP, 120 frames):
+To use your own footage instead (30 fps CFR, 960×540, short GOP, 120 frames), pass two or more videos, or a folder of them:
 
 ```bash
-npm run clips:normalize -- path/to/a.mov path/to/b.mov --start 2
+npm run clips:normalize -- path/to/a.mov path/to/b.mov path/to/c.mp4 --start 2
+npm run clips:normalize -- ~/Movies/study --starts 2,0,5
 ```
+
+Library order follows the order given (a folder is sorted by name), the starting timeline uses the first two, and each clip is labelled with its file name. `--start` sets where every clip begins in its source; `--starts` sets it per clip. The run replaces all previous clips in `public/clips`.
 
 ## Where things are
 

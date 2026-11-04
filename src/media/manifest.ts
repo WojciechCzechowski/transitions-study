@@ -25,7 +25,7 @@ function looksMissing(res: Response): boolean {
   return !res.ok || (res.headers.get('content-type') ?? '').includes('text/html');
 }
 
-const HINT = 'Run `npm run clips` (or `npm run clips:normalize -- <a> <b>`), then Retry.';
+const HINT = 'Run `npm run clips` (or `npm run clips:normalize -- <videos or folder>`), then Retry.';
 
 export async function loadManifest(signal: AbortSignal): Promise<Manifest> {
   let res: Response;

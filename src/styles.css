@@ -958,6 +958,12 @@ h2[tabindex='-1']:focus-visible {
   touch-action: none;
 }
 
+.library-card .preset-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .library-card[aria-disabled='true'] {
   cursor: progress;
   opacity: 0.6;
@@ -1516,6 +1522,13 @@ h2[tabindex='-1']:focus-visible {
 .clip-info-row svg {
   flex: none;
   opacity: 0.85;
+}
+
+/* Labels are source file names, which can be long. */
+.clip-info-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .clip-info-dim {
