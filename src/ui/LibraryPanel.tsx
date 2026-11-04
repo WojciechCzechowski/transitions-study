@@ -1,11 +1,12 @@
 import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react';
-import type { FrameStore } from '../media/FrameStore';
+import type { FrameFeeder } from '../media/FrameFeeder';
 import type { Source } from '../model/timeline';
 import { formatSeconds } from '../model/time';
 
 interface Props {
   sources: readonly Source[];
-  store: FrameStore;
+  /** Decodes the poster frames; null while the clips load. */
+  feeder: FrameFeeder | null;
   ready: boolean;
   /** Colour slot per source, matching the timeline. */
   sourceTone: (sourceId: string) => number;
@@ -20,7 +21,7 @@ interface Props {
 const DRAG_THRESHOLD_PX = 4;
 
 /** The prepared clips. Drag one into the timeline (as often as you like), or press Enter. */
-export function LibraryPanel({ sources, store, ready, sourceTone, ...on }: Props) {
+export function LibraryPanel({ sources, feeder, ready, sourceTone, ...on }: Props) {
   return (
     <section className="lpanel" role="tabpanel" aria-labelledby="library-heading">
       <header className="tpanel-head">
@@ -35,7 +36,7 @@ export function LibraryPanel({ sources, store, ready, sourceTone, ...on }: Props
         <ul className="library-list" aria-label="Library clips" aria-describedby="library-hint">
           {sources.map((s) => (
             <li key={s.id}>
-              <LibraryCard source={s} store={store} ready={ready} tone={sourceTone(s.id)} {...on} />
+              <LibraryCard source={s} feeder={feeder} ready={ready} tone={sourceTone(s.id)} {...on} />
             </li>
           ))}
         </ul>
@@ -49,7 +50,7 @@ export function LibraryPanel({ sources, store, ready, sourceTone, ...on }: Props
 
 function LibraryCard({
   source,
-  store,
+  feeder,
   ready,
   tone,
   onDragStart,
@@ -60,17 +61,18 @@ function LibraryCard({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const press = useRef<{ pointerId: number; x: number; y: number; dragging: boolean } | null>(null);
 
-  // Poster: the decoded middle frame.
+  // Poster: the middle frame, decoded once and copied onto the card's own canvas.
   useEffect(() => {
-    if (!ready) return;
-    const canvas = canvasRef.current;
-    const look = store.get(source.id, Math.floor(source.frames / 2));
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !look || !ctx) return;
-    canvas.width = look.bitmap.width;
-    canvas.height = look.bitmap.height;
-    ctx.drawImage(look.bitmap, 0, 0);
-  }, [ready, store, source]);
+    if (!feeder) return;
+    return feeder.requestPoster(source.id, Math.floor(source.frames / 2), (bitmap) => {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx) return;
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      ctx.drawImage(bitmap, 0, 0);
+    });
+  }, [feeder, source]);
 
   const onPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
     if (e.button !== 0 || !ready) return;

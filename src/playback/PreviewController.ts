@@ -2,12 +2,18 @@
  * Drives the preview canvas from one requestAnimationFrame loop.
  *
  * Everything per-frame lives here, not in React state, so hovering presets
- * never re-renders the tree. Every draw uses already-decoded ImageBitmaps, so
- * switching between the timeline and a preset preview is synchronous: the
- * canvas never shows an empty or stale frame in between (no flicker).
+ * never re-renders the tree. Draws are synchronous and read decoded frames
+ * from the FrameStore. Frames are decoded on demand: every draw tells the
+ * FrameFeeder what the preview needs now (and next), and when a frame is not
+ * decoded yet the nearest decoded frame of the same clip is shown until it
+ * arrives, which triggers a redraw. The playback clock never waits for the
+ * decoder.
  */
 import { getPreset, TRANSITION_DEFAULTS } from '../config/transitions.config';
+import { DECODE } from '../config/study.config';
+import type { FrameFeeder } from '../media/FrameFeeder';
 import type { FrameStore } from '../media/FrameStore';
+import { wantedFrames, type DemandMode } from '../model/demand';
 import { cubicBezier, type Bezier } from '../model/easing';
 import { tuningParams } from '../model/feel';
 import { loopFrameAt, loopRange, onceFrameAt, rebaseElapsed, type LoopRange } from '../model/previewLoop';
@@ -71,6 +77,14 @@ export class PreviewController {
   private lastKey = '';
   private easings = new Map<string, (x: number) => number>();
   private cb: ControllerCallbacks = NOOP_CALLBACKS;
+  private feeder: FrameFeeder | null = null;
+  private maxFrames = 0;
+  private demandKey = '';
+  private demandDoc: Doc | null = null;
+  /** Timeline frames shown during the current playback, and how many of them fell back to a neighbour. */
+  private playStats = { shown: 0, inexact: 0 };
+  private firstFrameWaiters: (() => void)[] = [];
+  private drewOnce = false;
 
   constructor(
     private readonly store: FrameStore,
@@ -90,6 +104,30 @@ export class PreviewController {
     this.ready = ready;
     if (!ready) this.stopAll();
     this.redrawNow();
+  }
+
+  /**
+   * The decoder feed for the current clips (null while loading). `maxFrames`
+   * is how many decoded frames fit the cache budget.
+   */
+  setFeeder(feeder: FrameFeeder | null, maxFrames = 0) {
+    this.feeder = feeder;
+    this.maxFrames = maxFrames;
+    this.demandKey = '';
+    this.demandDoc = null;
+    this.drewOnce = false;
+    this.redrawNow();
+  }
+
+  /** New decoded frames are in the store: redraw if the canvas was showing a stand-in. */
+  framesArrived() {
+    this.draw();
+  }
+
+  /** Resolves once a decoded frame has been drawn (the first frame after loading). */
+  firstFrame(): Promise<void> {
+    if (this.drewOnce) return Promise.resolve();
+    return new Promise((resolve) => this.firstFrameWaiters.push(resolve));
   }
 
   setDoc(doc: Doc) {
@@ -127,6 +165,8 @@ export class PreviewController {
     const last = timelineLength(this.doc) - 1;
     const start = this.playhead >= last ? 0 : this.playhead;
     this.playhead = start;
+    this.playStats = { shown: 0, inexact: 0 };
+    this.countedFrame = -1;
     this.mode = { kind: 'playing', startFrame: start, startTime: this.now() };
     this.cb.onPlayhead(start);
     this.cb.onPlayingChange(true);
@@ -138,6 +178,7 @@ export class PreviewController {
     if (this.mode.kind !== 'playing') return;
     this.mode = { kind: 'idle' };
     this.cb.onPlayingChange(false);
+    this.logPlayStats();
     this.draw();
   }
 
@@ -233,6 +274,50 @@ export class PreviewController {
     if (draw) this.draw();
   }
 
+  private logPlayStats() {
+    const { shown, inexact } = this.playStats;
+    if (shown === 0) return;
+    const msg = `[playback] ${shown} frames shown, ${inexact} of them stand-ins (decode fell behind)`;
+    if (inexact > 0) console.warn(msg);
+    else console.info(msg);
+  }
+
+  /** Tell the feeder which source frames the preview needs now, when that changes. */
+  private updateDemand(doc: Doc) {
+    const feeder = this.feeder;
+    if (!feeder) return;
+    const m = this.mode;
+    let mode: DemandMode;
+    let key: string;
+    if (m.kind === 'preview') {
+      mode = { kind: 'preview', frame: m.frame, range: m.range, override: { cutKey: m.candidate.cutKey, look: m.candidate } };
+      const c = m.candidate;
+      key = `p|${m.frame}|${m.range.start}|${m.range.end}|${c.cutKey}|${c.presetId}|${c.duration}`;
+    } else {
+      mode = { kind: m.kind, playhead: this.playhead };
+      key = `${m.kind}|${this.playhead}`;
+    }
+    if (key === this.demandKey && doc === this.demandDoc) return;
+    this.demandKey = key;
+    this.demandDoc = doc;
+    feeder.setDemand(
+      wantedFrames(doc, mode, {
+        lookahead: DECODE.lookahead,
+        scrubAhead: DECODE.scrubAhead,
+        scrubBehind: DECODE.scrubBehind,
+        maxFrames: this.maxFrames,
+      }),
+    );
+  }
+
+  private markDrawn() {
+    if (this.drewOnce) return;
+    this.drewOnce = true;
+    const waiters = this.firstFrameWaiters;
+    this.firstFrameWaiters = [];
+    for (const w of waiters) w();
+  }
+
   private stopAll() {
     if (this.mode.kind === 'playing') this.cb.onPlayingChange(false);
     if (this.mode.kind === 'preview') this.cb.onPreviewChange({ active: false, playing: false });
@@ -257,8 +342,10 @@ export class PreviewController {
         this.cb.onPlayhead(f);
       }
       if (f >= last) {
+        this.draw();
         this.mode = { kind: 'idle' };
         this.cb.onPlayingChange(false);
+        this.logPlayStats();
       } else {
         more = true;
       }
@@ -300,16 +387,20 @@ export class PreviewController {
     const override: TransitionOverride | undefined = isPreview
       ? { cutKey: m.candidate.cutKey, look: m.candidate }
       : undefined;
+    this.updateDemand(doc);
     const r = resolveFrame(doc, t, override);
+    const counting = m.kind === 'playing' && t !== this.countedFrame;
 
     if (r.kind === 'single') {
       const look = this.store.get(r.source.sourceId, r.source.frame);
       if (!look) return;
+      if (counting) this.count(t, look.exact);
       const key = `s|${r.source.sourceId}|${look.frame}`;
       if (key !== this.lastKey) {
         renderer.drawSingle(look.bitmap);
         this.lastKey = key;
       }
+      this.markDrawn();
       return;
     }
 
@@ -317,6 +408,7 @@ export class PreviewController {
     const from = this.store.get(r.from.sourceId, r.from.frame);
     const to = this.store.get(r.to.sourceId, r.to.frame);
     if (!from || !to) return;
+    if (counting) this.count(t, from.exact && to.exact);
     const { bezier, intensity } = tuningParams(r.look, preset.feel);
     const eased = this.ease(bezier)(r.linear);
     const key = `t|${preset.id}|${r.from.sourceId}:${from.frame}|${r.to.sourceId}:${to.frame}|${eased}|${intensity}|${preset.params.join(',')}`;
@@ -332,5 +424,15 @@ export class PreviewController {
       });
       this.lastKey = key;
     }
+    this.markDrawn();
+  }
+
+  /** Last timeline frame counted in playStats, so each frame counts once. */
+  private countedFrame: Frames = -1;
+
+  private count(t: Frames, exact: boolean) {
+    this.countedFrame = t;
+    this.playStats.shown++;
+    if (!exact) this.playStats.inexact++;
   }
 }

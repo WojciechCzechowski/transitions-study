@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const FPS = 30;
+/** Size of the synthetic clips (make-clips.mjs). normalize-clips.mjs defaults to 1280×720 (--size). */
 export const WIDTH = 960;
 export const HEIGHT = 540;
 export const FRAMES = 120;
@@ -14,14 +15,16 @@ export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const CLIPS_DIR = join(ROOT, 'public', 'clips');
 
 /**
- * Encoder settings shared by both scripts: H.264, constant 30 fps, short GOP
- * and no B-frames so per-frame seeking in the browser is fast and exact.
+ * Encoder settings shared by both scripts: H.264, constant 30 fps, a keyframe
+ * every 10 frames and no B-frames. The app decodes one keyframe group at a
+ * time with WebCodecs and reads frames in file order, so both matter.
+ * CRF 20 keeps 720p downloads modest with no visible loss in the preview.
  */
 export const ENCODE_ARGS = [
   '-an',
   '-c:v', 'libx264',
   '-preset', 'medium',
-  '-crf', '18',
+  '-crf', '20',
   '-g', '10',
   '-keyint_min', '10',
   '-bf', '0',

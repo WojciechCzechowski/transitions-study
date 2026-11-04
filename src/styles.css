@@ -110,22 +110,6 @@ kbd {
 
 /* Hidden <video> elements used for decoding. They must be in the document to
    present frames, but should not be seen or interacted with. */
-.decode-host {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: 2px;
-  height: 2px;
-  overflow: hidden;
-  opacity: 0.01;
-  pointer-events: none;
-}
-
-.decode-host video {
-  width: 2px;
-  height: 2px;
-}
-
 /* Visible focus everywhere keyboard focus lands. */
 :focus-visible {
   outline: 2px solid var(--focus);

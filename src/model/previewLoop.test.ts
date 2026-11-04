@@ -1,46 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { frameBytes, planLibraryDecode, type LibraryDecodeInput } from './decodePlan';
 import { cycleLength, loopFrameAt, loopRange, onceFrameAt, rebaseElapsed } from './previewLoop';
-
-const base = (over: Partial<LibraryDecodeInput> = {}): LibraryDecodeInput => ({
-  sources: [
-    { id: 'a', frames: 120 },
-    { id: 'b', frames: 120 },
-  ],
-  sourceWidth: 960,
-  sourceHeight: 540,
-  capBytes: 1e12,
-  minScale: 0.5,
-  ...over,
-});
-
-describe('planLibraryDecode', () => {
-  it('covers every frame of every source', () => {
-    const p = planLibraryDecode(base());
-    expect(p.ranges).toEqual([
-      { sourceId: 'a', start: 0, end: 120 },
-      { sourceId: 'b', start: 0, end: 120 },
-    ]);
-    expect(p.frameCount).toBe(240);
-    expect(p).toMatchObject({ scale: 1, width: 960, height: 540, overCap: false });
-  });
-
-  it('shrinks the decode size to respect the memory cap', () => {
-    const cap = 400 * 1024 * 1024;
-    const p = planLibraryDecode(base({ capBytes: cap }));
-    expect(p.frameCount).toBe(240);
-    expect(p.scale).toBeLessThan(1);
-    expect(p.scale).toBeGreaterThan(0.85);
-    expect(p.bytes).toBeLessThanOrEqual(cap);
-    expect(p.width % 2).toBe(0);
-    expect(p.height % 2).toBe(0);
-  });
-
-  it('keeps every frame at the minimum scale when even that exceeds the cap', () => {
-    const p = planLibraryDecode(base({ capBytes: frameBytes(480, 270) * 100 }));
-    expect(p).toMatchObject({ scale: 0.5, width: 480, height: 270, frameCount: 240, overCap: true });
-  });
-});
 
 const ALL = { start: 0, end: 120 };
 

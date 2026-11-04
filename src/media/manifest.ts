@@ -77,11 +77,24 @@ function validate(data: unknown): Manifest {
   return { fps: FPS, source: typeof m.source === 'string' ? m.source : 'unknown', clips };
 }
 
-/** Fail early with a clear "not found" before handing a URL to <video>. */
-export async function checkClipFile(file: string, signal: AbortSignal): Promise<void> {
+/** Size of a clip file from its response headers, or 0 when unknown. */
+function declaredLength(res: Response): number {
+  const n = Number(res.headers.get('content-length'));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Download a whole clip file. `onProgress` gets the bytes received so far and
+ * the declared size (0 when the server does not say).
+ */
+export async function fetchClip(
+  file: string,
+  signal: AbortSignal,
+  onProgress: (loaded: number, total: number) => void,
+): Promise<Uint8Array> {
   let res: Response;
   try {
-    res = await fetch(clipUrl(file), { method: 'HEAD', signal, cache: 'no-cache' });
+    res = await fetch(clipUrl(file), { signal, cache: 'no-cache' });
   } catch (e) {
     if (signal.aborted) throw e;
     throw new StudyError('network', 'Could not reach the clip file.', file, HINT);
@@ -89,4 +102,33 @@ export async function checkClipFile(file: string, signal: AbortSignal): Promise<
   if (looksMissing(res)) {
     throw new StudyError('not-found', `public/clips/${file} was not found (HTTP ${res.status}).`, file, HINT);
   }
+  const total = declaredLength(res);
+  onProgress(0, total);
+  if (!res.body) {
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    onProgress(bytes.length, total);
+    return bytes;
+  }
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let loaded = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      loaded += value.length;
+      onProgress(loaded, total);
+    }
+  } catch (e) {
+    if (signal.aborted) throw e;
+    throw new StudyError('network', 'The download of the clip file was interrupted.', file, HINT);
+  }
+  const bytes = new Uint8Array(loaded);
+  let o = 0;
+  for (const p of parts) {
+    bytes.set(p, o);
+    o += p.length;
+  }
+  return bytes;
 }

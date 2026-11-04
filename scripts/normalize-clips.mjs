@@ -1,9 +1,12 @@
 // Converts your own videos into the format the study expects:
-// 30 fps constant frame rate, 960×540 (letterboxed), short GOP, no audio,
+// 30 fps constant frame rate, 1280×720 (letterboxed), short GOP, no audio,
 // trimmed to 120 frames. Writes public/clips/clip-a.mp4, clip-b.mp4, … and
 // manifest.json, replacing whatever clips were there before.
 //
-//   node scripts/normalize-clips.mjs <video or folder>... [--start 2.5] [--starts 2,0,5] [--frames 120]
+//   node scripts/normalize-clips.mjs <video or folder>... [--start 2.5] [--starts 2,0,5] [--frames 120|all] [--size 1280x720]
+//
+// Clip length does not affect memory (the app decodes frames on demand), only
+// download size. --frames all keeps each source to its end.
 //
 // Pass at least two videos. A folder adds every video in it, sorted by name.
 // Library order follows the order given; the starting timeline uses the
@@ -15,32 +18,39 @@
 // need, the app shows an error explaining which clip is too short.
 import { basename, extname, join, resolve } from 'node:path';
 import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { CLIPS_DIR, ENCODE_ARGS, FPS, FRAMES, HEIGHT, WIDTH, ensureClipsDir, runFfmpeg, writeManifest } from './lib.mjs';
+import { CLIPS_DIR, ENCODE_ARGS, FPS, FRAMES, ensureClipsDir, runFfmpeg, writeManifest } from './lib.mjs';
 
 const VIDEO_EXT = new Set(['.mov', '.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mts', '.m2ts']);
 const USAGE =
-  'Usage: npm run clips:normalize -- <video or folder>... [--start s] [--starts s1,s2,…] [--frames n]';
+  'Usage: npm run clips:normalize -- <video or folder>... [--start s] [--starts s1,s2,…] [--frames n|all] [--size WxH]';
 
 const fail = (msg) => {
   console.error(msg);
   process.exit(1);
 };
 
-const isNonNegative = (n) => Number.isFinite(n) && n >= 0;
+const isNonNegative = (n) => !Number.isNaN(n) && n >= 0;
 
 function parseArgs(argv) {
   const inputs = [];
-  const opts = { start: 0, starts: [], frames: FRAMES };
+  const opts = { start: 0, starts: [], frames: FRAMES, width: 1280, height: 720 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--start') opts.start = Number(argv[++i]);
     else if (a === '--starts') opts.starts = String(argv[++i] ?? '').split(',').map((s) => Number(s.trim()));
-    else if (a === '--frames') opts.frames = Number(argv[++i]);
-    else if (a.startsWith('--')) fail(`Unknown option ${a}\n${USAGE}`);
+    else if (a === '--frames') {
+      const v = String(argv[++i] ?? '');
+      opts.frames = v === 'all' ? Infinity : Number(v);
+    } else if (a === '--size') {
+      const m = /^(\d+)x(\d+)$/.exec(String(argv[++i] ?? ''));
+      if (!m || Number(m[1]) % 2 || Number(m[2]) % 2) fail('--size must look like 1280x720, with even numbers');
+      opts.width = Number(m[1]);
+      opts.height = Number(m[2]);
+    } else if (a.startsWith('--')) fail(`Unknown option ${a}\n${USAGE}`);
     else inputs.push(a);
   }
   if (![opts.start, opts.frames, ...opts.starts].every(isNonNegative)) {
-    fail('--start, --starts and --frames must be non-negative numbers');
+    fail('--start, --starts and --frames must be non-negative numbers (or --frames all)');
   }
   return { inputs, opts };
 }
@@ -95,13 +105,13 @@ for (const clip of clips) {
     '-vf',
     [
       `fps=${FPS}`,
-      `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease`,
-      `pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black`,
+      `scale=${opts.width}:${opts.height}:force_original_aspect_ratio=decrease`,
+      `pad=${opts.width}:${opts.height}:(ow-iw)/2:(oh-ih)/2:color=black`,
       'setsar=1',
       'scale=out_color_matrix=bt709:out_range=tv',
       'format=yuv420p',
     ].join(','),
-    '-frames:v', String(opts.frames),
+    ...(Number.isFinite(opts.frames) ? ['-frames:v', String(opts.frames)] : []),
     '-fps_mode', 'cfr',
     ...ENCODE_ARGS,
     join(CLIPS_DIR, clip.file),
@@ -121,7 +131,7 @@ for (const f of readdirSync(CLIPS_DIR)) {
 
 const manifest = writeManifest(clips, 'normalized');
 for (const c of manifest.clips) {
-  if (c.frames < opts.frames) {
+  if (Number.isFinite(opts.frames) && c.frames < opts.frames) {
     console.warn(`Warning: ${c.file} (${c.label}) has only ${c.frames} frames (asked for ${opts.frames}). The source is too short after its start point.`);
   }
 }

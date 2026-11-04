@@ -10,6 +10,8 @@ interface Entry<B> {
   readonly width: number;
   readonly height: number;
   readonly bytes: number;
+  /** Value of the store's clock when this frame was last wanted (or stored). */
+  lastWanted: number;
 }
 
 export interface Lookup<B> {
@@ -19,13 +21,26 @@ export interface Lookup<B> {
   readonly exact: boolean;
 }
 
+export interface WantedFrame {
+  readonly sourceId: string;
+  readonly frame: Frames;
+}
+
 const key = (clipId: string, frame: Frames) => `${clipId}:${frame}`;
 
-/** Pre-decoded frames keyed by clip and source frame, with byte accounting. */
+/**
+ * Decoded frames keyed by clip and source frame, under a byte budget.
+ * Frames the preview currently wants are never evicted; the others go
+ * least-recently-wanted first, and every evicted bitmap is closed.
+ */
 export class FrameStore<B extends Closable = ImageBitmap> {
   private readonly entries = new Map<string, Entry<B>>();
   private readonly frames = new Map<string, Set<Frames>>();
+  private wanted = new Set<string>();
+  private clock = 0;
   private totalBytes = 0;
+
+  constructor(readonly budgetBytes = Number.POSITIVE_INFINITY) {}
 
   get bytes(): number {
     return this.totalBytes;
@@ -40,15 +55,32 @@ export class FrameStore<B extends Closable = ImageBitmap> {
     return !!e && (width === undefined || (e.width === width && e.height === height));
   }
 
+  /** Whether the latest `setWanted` asked for this frame. */
+  isWanted(clipId: string, frame: Frames): boolean {
+    return this.wanted.has(key(clipId, frame));
+  }
+
+  /** Replace the set of frames the preview needs now. They are protected from eviction. */
+  setWanted(frames: readonly WantedFrame[]): void {
+    this.clock++;
+    this.wanted = new Set(frames.map((f) => key(f.sourceId, f.frame)));
+    for (const k of this.wanted) {
+      const e = this.entries.get(k);
+      if (e) e.lastWanted = this.clock;
+    }
+    this.trim();
+  }
+
   put(clipId: string, frame: Frames, bitmap: B, width: number, height: number): void {
     const k = key(clipId, frame);
     this.evictKey(k, clipId, frame);
     const bytes = width * height * 4;
-    this.entries.set(k, { bitmap, width, height, bytes });
+    this.entries.set(k, { bitmap, width, height, bytes, lastWanted: this.clock });
     let set = this.frames.get(clipId);
     if (!set) this.frames.set(clipId, (set = new Set()));
     set.add(frame);
     this.totalBytes += bytes;
+    this.trim();
   }
 
   /** Exact frame, or the nearest decoded frame of the same clip. */
@@ -77,6 +109,19 @@ export class FrameStore<B extends Closable = ImageBitmap> {
 
   clear(): void {
     this.retain(() => false);
+  }
+
+  /** Evict unwanted frames, least recently wanted first, until the store fits its budget. */
+  private trim() {
+    if (this.totalBytes <= this.budgetBytes) return;
+    const victims = [...this.entries.entries()]
+      .filter(([k]) => !this.wanted.has(k))
+      .sort((x, y) => x[1].lastWanted - y[1].lastWanted);
+    for (const [k] of victims) {
+      if (this.totalBytes <= this.budgetBytes) break;
+      const sep = k.lastIndexOf(':');
+      this.evictKey(k, k.slice(0, sep), Number(k.slice(sep + 1)));
+    }
   }
 
   private evictKey(k: string, clipId: string, frame: Frames) {

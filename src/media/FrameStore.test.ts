@@ -40,6 +40,33 @@ describe('FrameStore', () => {
     expect(s.get('c', 1)).toBeNull();
   });
 
+  it('evicts unwanted frames, least recently wanted first, to stay in budget', () => {
+    // Each 2×2 frame is 16 bytes; the budget holds three.
+    const s = new FrameStore<Fake>(48);
+    const f = [0, 1, 2].map((i) => new Fake(`a${i}`));
+    s.setWanted([{ sourceId: 'a', frame: 0 }, { sourceId: 'a', frame: 1 }, { sourceId: 'a', frame: 2 }]);
+    f.forEach((b, i) => s.put('a', i, b, 2, 2));
+    s.setWanted([{ sourceId: 'a', frame: 1 }]); // 0 and 2 are now unwanted, both last wanted at the same time
+    s.setWanted([{ sourceId: 'a', frame: 2 }, { sourceId: 'a', frame: 3 }]); // 2 wanted again; 0 and 1 are older
+    s.put('a', 3, new Fake('a3'), 2, 2);
+    expect(f[0]!.closed).toBe(true);
+    expect(f[1]!.closed).toBe(false);
+    expect(s.bytes).toBe(48);
+    expect([0, 1, 2, 3].map((i) => s.has('a', i))).toEqual([false, true, true, true]);
+  });
+
+  it('never evicts wanted frames, even over budget', () => {
+    const s = new FrameStore<Fake>(16);
+    s.setWanted([{ sourceId: 'a', frame: 0 }, { sourceId: 'a', frame: 1 }]);
+    s.put('a', 0, new Fake('a0'), 2, 2);
+    s.put('a', 1, new Fake('a1'), 2, 2);
+    expect(s.size).toBe(2);
+    expect(s.isWanted('a', 1)).toBe(true);
+    s.setWanted([{ sourceId: 'a', frame: 1 }]);
+    expect(s.has('a', 0)).toBe(false);
+    expect(s.size).toBe(1);
+  });
+
   it('matches dimensions when asked', () => {
     const s = new FrameStore<Fake>();
     s.put('a', 0, new Fake('x'), 8, 4);

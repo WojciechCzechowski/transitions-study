@@ -1,6 +1,6 @@
 /**
  * Study harness settings: where clips come from, the starting timeline,
- * Library insert handles and the decode budget.
+ * Library insert handles and the decoded-frame cache.
  */
 import type { ClipLayout } from '../model/timeline';
 
@@ -22,16 +22,16 @@ export const START_LAYOUT: readonly [ClipLayout, ClipLayout] = [
  */
 export const LIBRARY_INSERT = { head: 30, tail: 30 } as const;
 
-/** Every frame of every library clip is pre-decoded once, at the largest size that fits. */
+/**
+ * Frames are decoded on demand (WebCodecs, one keyframe group at a time) into
+ * a capped cache, so memory stays near `cacheBytes` whatever the clip length.
+ */
 export const DECODE = {
-  /** Upper bound for pre-decoded ImageBitmaps, estimated as width × height × 4. */
-  capBytes: 400 * 1024 * 1024,
-  /** Decode size may shrink to this fraction of the source; past that the cap is exceeded (with a warning). */
-  minScale: 0.5,
-  /** Library clips decoded at the same time. */
-  concurrency: 2,
-  /** Give up on a single seek after this long. */
-  seekTimeoutMs: 5000,
-  /** Give up waiting for a clip's metadata after this long. */
-  loadTimeoutMs: 15000,
+  /** Upper bound for decoded ImageBitmaps, estimated as width × height × 4 (about 85 frames at 1280×720). */
+  cacheBytes: 320 * 1024 * 1024,
+  /** Timeline frames kept decoded ahead of the playhead while playing. */
+  lookahead: 45,
+  /** Timeline frames kept decoded around a still playhead, for scrubbing and frame stepping. */
+  scrubAhead: 10,
+  scrubBehind: 5,
 } as const;

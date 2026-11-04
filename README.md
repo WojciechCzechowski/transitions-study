@@ -2,7 +2,7 @@
 
 An unofficial interaction study of transitions in a very simple browser video editor: drag prepared clips from the Library onto a magnetic V1 track, trim them, split them at the playhead and put transitions on any cut. React, TypeScript, Vite, Vitest and WebGL2. No backend.
 
-The Library is the clips listed in `public/clips/manifest.json` (at least two; the starting timeline uses the first two). Every frame of every library clip is pre-decoded once at the largest size that fits the memory cap in `src/config/study.config.ts`, so playback, scrubbing and transitions are frame-accurate from memory. Many long clips lower the decode resolution; the console logs the chosen size.
+The Library is the clips listed in `public/clips/manifest.json` (at least two; the starting timeline uses the first two). The app downloads each MP4, reads its frame table, and decodes frames on demand with WebCodecs, one keyframe group (10 frames) at a time, into a cache capped at 320 MB (`DECODE` in `src/config/study.config.ts`). Only the frames around the playhead, the playback lookahead and the transition preview loop are kept, so memory does not grow with clip length and every frame is still exact. If decoding falls behind, the preview shows the nearest decoded frame and playback keeps time; on pause the console says how many frames were stand-ins. It needs a browser with WebCodecs (current Chrome, Edge, Safari or Firefox).
 
 ```bash
 npm install
@@ -10,27 +10,28 @@ npm run clips      # generate the two synthetic clips into public/clips (needs f
 npm run dev
 ```
 
-To use your own footage instead (30 fps CFR, 960×540, short GOP, 120 frames), pass two or more videos, or a folder of them:
+To use your own footage instead (30 fps CFR, 1280×720, a keyframe every 10 frames, no B-frames, 120 frames by default), pass two or more videos, or a folder of them:
 
 ```bash
 npm run clips:normalize -- path/to/a.mov path/to/b.mov path/to/c.mp4 --start 2
-npm run clips:normalize -- ~/Movies/study --starts 2,0,5
+npm run clips:normalize -- ~/Movies/study --starts 2,0,5 --frames all
 ```
 
-Library order follows the order given (a folder is sorted by name), the starting timeline uses the first two, and each clip is labelled with its file name. `--start` sets where every clip begins in its source; `--starts` sets it per clip. The run replaces all previous clips in `public/clips`.
+Library order follows the order given (a folder is sorted by name), the starting timeline uses the first two, and each clip is labelled with its file name. `--start` sets where every clip begins in its source; `--starts` sets it per clip. `--frames all` keeps each video to its end (length only costs download size), and `--size 1920x1080` changes the output size. The run replaces all previous clips in `public/clips`.
 
 ## Where things are
 
 | Area | File |
 | --- | --- |
 | Preset values, Feel endpoints, preview loop padding | `src/config/transitions.config.ts` |
-| Starting timeline, Library insert handles, decode memory cap | `src/config/study.config.ts` |
+| Starting timeline, Library insert handles, decoded-frame cache | `src/config/study.config.ts` |
 | Timeline model (clips, cuts, per-cut limits, frame mapping) | `src/model/timeline.ts` |
 | Insert / move / delete / split / trim, and per-cut transition ops | `src/model/ops.ts`, `src/model/feel.ts` |
 | Undo history with gestures | `src/model/history.ts` |
-| Library decode planning under the memory cap | `src/model/decodePlan.ts` |
+| Which source frames the preview needs now (playhead, lookahead, preview loop) | `src/model/demand.ts` |
 | Insertion points, ruler ticks, zoom | `src/model/timelineView.ts` |
-| Frame-accurate pre-decode to ImageBitmaps | `src/media/decoder.ts` |
+| MP4 frame table reader, WebCodecs decoder per clip | `src/media/mp4.ts`, `src/media/ClipDecoder.ts` |
+| Decode scheduling and the capped frame cache | `src/media/FrameFeeder.ts`, `src/media/FrameStore.ts` |
 | WebGL2 renderer and one shader per transition | `src/render/` |
 | Single rAF loop for playback and previews | `src/playback/PreviewController.ts` |
 | Workspace shell: top bar, resizable sidebar / preview / timeline | `src/ui/Shell.tsx`, `src/ui/Splitter.tsx` |

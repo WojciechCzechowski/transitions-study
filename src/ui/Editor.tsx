@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Minus, Pause, Play, Plus, Redo2, Scan, SquareSplitHorizontal, Undo2 } from 'lucide-react';
 import { LIBRARY_INSERT } from '../config/study.config';
 import { getPreset, PRESETS, TRANSITION_DEFAULTS } from '../config/transitions.config';
-import type { FrameStore } from '../media/FrameStore';
+import type { FrameFeeder } from '../media/FrameFeeder';
 import type { Bezier } from '../model/easing';
 import {
   beginGesture,
@@ -65,7 +65,8 @@ import { TransitionsPanel } from './TransitionsPanel';
 interface Props {
   baseDoc: Doc;
   sources: readonly Source[];
-  store: FrameStore;
+  /** Decodes Library posters; null while the clips load. */
+  feeder: FrameFeeder | null;
   controller: PreviewController;
   ready: boolean;
   reducedMotion: boolean;
@@ -128,7 +129,7 @@ const SPLIT_REASONS:Record<Exclude<SplitResult, { ok: true }>['reason'], string>
  * when the clip manifest reloads, which resets history. Renders
  * the sidebar (Library / Transitions) and the timeline pane into the shell's slots.
  */
-export function Editor({ baseDoc, sources, store, controller, ready, reducedMotion, announce, sidebarEl, timelineEl }: Props) {
+export function Editor({ baseDoc, sources, feeder, controller, ready, reducedMotion, announce, sidebarEl, timelineEl }: Props) {
   const [history, setHistory] = useState<History<Doc>>(() => createHistory(baseDoc));
   const doc = history.present;
 
@@ -765,7 +766,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
         {tab === 'library' ? (
           <LibraryPanel
             sources={sources}
-            store={store}
+            feeder={feeder}
             ready={ready}
             sourceTone={sourceTone}
             onDragStart={onLibDragStart}

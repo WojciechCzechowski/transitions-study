@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DECODE, START_LAYOUT } from './config/study.config';
-import { decodeFrames } from './media/decoder';
+import { checkDecoderSupport, ClipDecoder } from './media/ClipDecoder';
 import { isAbort, StudyError } from './media/errors';
+import { FrameFeeder } from './media/FrameFeeder';
 import { FrameStore } from './media/FrameStore';
-import { loadManifest, type Manifest } from './media/manifest';
-import { framesInRange, planLibraryDecode } from './model/decodePlan';
+import { fetchClip, loadManifest, type Manifest } from './media/manifest';
+import { parseMp4 } from './media/mp4';
 import { createDoc, type Source } from './model/timeline';
-import { FPS } from './model/time';
 import { PreviewController } from './playback/PreviewController';
 import { Editor } from './ui/Editor';
 import { installModalityTracking, useAnnouncer, useReducedMotion } from './ui/hooks';
@@ -20,24 +20,15 @@ function toStudyError(e: unknown): StudyError {
   return new StudyError('decode', e instanceof Error ? e.message : String(e));
 }
 
-/** Run async jobs with at most `limit` in flight; rejects on the first failure. */
-async function pool<T>(items: readonly T[], limit: number, run: (item: T) => Promise<unknown>): Promise<void> {
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) await run(items[next++]!);
-  };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
-}
-
 export function App() {
   const reducedMotion = useReducedMotion();
-  const [store] = useState(() => new FrameStore());
+  const [store] = useState(() => new FrameStore(DECODE.cacheBytes));
+  const [feeder, setFeeder] = useState<FrameFeeder | null>(null);
   const [controller] = useState(() => new PreviewController(store));
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [manifestVersion, setManifestVersion] = useState(0);
   const [load, setLoad] = useState<LoadState>({ status: 'loading', phase: 'manifest', done: 0, total: 0 });
   const [attempt, setAttempt] = useState(0);
-  const hostRef = useRef<HTMLDivElement>(null);
   const [sidebarEl, setSidebarEl] = useState<HTMLElement | null>(null);
   const [timelineEl, setTimelineEl] = useState<HTMLElement | null>(null);
   const [message, announce] = useAnnouncer();
@@ -66,71 +57,88 @@ export function App() {
   );
   const docResult = useMemo(() => (sources.length >= 2 ? createDoc(sources.slice(0, 2), START_LAYOUT) : null), [sources]);
 
-  // 2. Pre-decode every frame of every library clip, once per manifest.
-  //    Timeline clips are windows onto these, so edits never need new frames.
+  // 2. Download and index every library clip, then decode frames on demand.
+  //    Only frames the preview needs now (and next) are decoded, into a capped
+  //    cache, so memory does not grow with clip length.
   useEffect(() => {
     if (!manifest) return;
     const ac = new AbortController();
-    const first = manifest.clips[0]!;
-    const plan = planLibraryDecode({
-      sources: manifest.clips,
-      sourceWidth: first.width,
-      sourceHeight: first.height,
-      capBytes: DECODE.capBytes,
-      minScale: DECODE.minScale,
-    });
-    const inPlan = (sourceId: string, f: number) => plan.ranges.some((r) => r.sourceId === sourceId && f >= r.start && f < r.end);
-
-    controller.setReady(false);
-    store.retain((sourceId, f, w, h) => w === plan.width && h === plan.height && inPlan(sourceId, f));
-
-    let done = 0;
+    const loaded = new Map<string, number>();
+    const totals = new Map<string, number>();
+    const sum = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0);
     let raf = 0;
-    const total = plan.frameCount;
     const flush = () => {
       raf = 0;
-      setLoad({ status: 'loading', phase: 'frames', done, total });
+      setLoad({ status: 'loading', phase: 'clips', done: sum(loaded), total: sum(totals) });
     };
-    setLoad({ status: 'loading', phase: 'frames', done: 0, total });
-
-    const opts = {
-      signal: ac.signal,
-      onFrame: () => {
-        done++;
-        if (!raf) raf = requestAnimationFrame(flush);
-      },
-      seekTimeoutMs: DECODE.seekTimeoutMs,
-      loadTimeoutMs: DECODE.loadTimeoutMs,
-      host: hostRef.current!,
+    let feeder: FrameFeeder | null = null;
+    const decoders: ClipDecoder[] = [];
+    const fail = (e: unknown) => {
+      if (isAbort(e) || ac.signal.aborted) return;
+      ac.abort();
+      cancelAnimationFrame(raf);
+      setLoad({ status: 'error', error: toStudyError(e) });
     };
 
-    pool(plan.ranges, DECODE.concurrency, (r) => {
-      const clip = manifest.clips.find((c) => c.id === r.sourceId)!;
-      return decodeFrames(
-        { clipId: r.sourceId, file: clip.file, sourceFrames: clip.frames, frames: framesInRange(r), width: plan.width, height: plan.height, fps: FPS },
-        store,
-        opts,
+    controller.setReady(false);
+    setLoad({ status: 'loading', phase: 'clips', done: 0, total: 0 });
+
+    (async () => {
+      const parsed = await Promise.all(
+        manifest.clips.map(async (clip) => {
+          const bytes = await fetchClip(clip.file, ac.signal, (n, total) => {
+            loaded.set(clip.id, n);
+            totals.set(clip.id, total);
+            if (!raf) raf = requestAnimationFrame(flush);
+          });
+          const track = parseMp4(bytes, clip.file);
+          if (track.samples.length < clip.frames) {
+            throw new StudyError(
+              'too-short',
+              `The file has ${track.samples.length} frames but the manifest says ${clip.frames}.`,
+              clip.file,
+              'Regenerate the manifest with the clip scripts, then Retry.',
+            );
+          }
+          await checkDecoderSupport(track, clip.file);
+          return { clip, bytes, track };
+        }),
       );
-    })
-      .then(() => {
-        if (ac.signal.aborted) return;
-        cancelAnimationFrame(raf);
-        setLoad({ status: 'ready' });
-        controller.setReady(true);
-        const note = `${plan.frameCount} frames at ${plan.width}×${plan.height} (scale ${plan.scale}, ${(plan.bytes / 2 ** 20).toFixed(0)} MB)`;
-        if (plan.overCap) console.warn(`[decode] over the memory cap even at the minimum scale: ${note}`);
-        else console.info(`[decode] library ready: ${note}`);
-      })
-      .catch((e) => {
-        if (isAbort(e) || ac.signal.aborted) return;
-        ac.abort();
-        cancelAnimationFrame(raf);
-        setLoad({ status: 'error', error: toStudyError(e) });
-      });
+      if (ac.signal.aborted) return;
+      cancelAnimationFrame(raf);
+      raf = 0;
+
+      for (const p of parsed) decoders.push(new ClipDecoder(p.clip.id, p.clip.file, p.bytes, p.track));
+      feeder = new FrameFeeder(
+        store,
+        new Map(decoders.map((d) => [d.sourceId, d])),
+        () => controller.framesArrived(),
+        (_sourceId, e) => fail(e),
+      );
+      const frameBytes = Math.max(...parsed.map((p) => p.track.width * p.track.height * 4));
+      const maxFrames = Math.max(2, Math.floor(DECODE.cacheBytes / frameBytes));
+      setFeeder(feeder);
+      setLoad({ status: 'loading', phase: 'first-frame', done: 0, total: 0 });
+      controller.setFeeder(feeder, maxFrames);
+      controller.setReady(true);
+      await controller.firstFrame();
+      if (ac.signal.aborted) return;
+      setLoad({ status: 'ready' });
+      const mb = (n: number) => (n / 2 ** 20).toFixed(0);
+      console.info(
+        `[decode] ${parsed.length} clips loaded (${mb(sum(loaded))} MB); decoding on demand into a ${mb(DECODE.cacheBytes)} MB cache (${maxFrames} frames)`,
+      );
+    })().catch(fail);
 
     return () => {
       ac.abort();
       cancelAnimationFrame(raf);
+      controller.setReady(false);
+      controller.setFeeder(null);
+      feeder?.dispose();
+      for (const d of decoders) d.close();
+      store.clear();
+      setFeeder(null);
     };
   }, [manifest, controller, store]);
 
@@ -175,7 +183,7 @@ export function App() {
           key={manifestVersion}
           baseDoc={docResult.doc}
           sources={sources}
-          store={store}
+          feeder={feeder}
           controller={controller}
           ready={load.status === 'ready'}
           reducedMotion={reducedMotion}
@@ -188,7 +196,6 @@ export function App() {
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         <span key={message.n}>{message.text}</span>
       </div>
-      <div ref={hostRef} className="decode-host" aria-hidden="true" />
     </>
   );
 }

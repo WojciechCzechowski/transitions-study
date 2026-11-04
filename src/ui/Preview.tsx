@@ -4,7 +4,8 @@ import type { PreviewController } from '../playback/PreviewController';
 import { Renderer } from '../render/Renderer';
 
 export type LoadState =
-  | { status: 'loading'; phase: 'manifest' | 'frames'; done: number; total: number }
+  /** `done`/`total` are bytes for the clips phase (total is 0 when the server does not say). */
+  | { status: 'loading'; phase: 'manifest' | 'clips' | 'first-frame'; done: number; total: number }
   | { status: 'ready' }
   | { status: 'error'; error: StudyError };
 
@@ -73,23 +74,35 @@ export function Preview({ controller, load, onRetry }: Props) {
         </div>
       ) : load.status === 'loading' ? (
         <div className="preview-overlay" role="status" aria-live="polite">
-          <p>
-            {load.phase === 'manifest'
-              ? 'Loading clips…'
-              : `Preparing frames around the cut: ${load.done} / ${load.total}`}
-          </p>
+          <p>{loadingText(load)}</p>
           <div
             className="progress"
             role="progressbar"
-            aria-label="Decoding frames"
+            aria-label="Loading clips"
             aria-valuemin={0}
-            aria-valuemax={Math.max(1, load.total)}
-            aria-valuenow={load.done}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(loadingPercent(load))}
           >
-            <div className="progress-fill" style={{ width: `${load.total ? (100 * load.done) / load.total : 0}%` }} />
+            <div className="progress-fill" style={{ width: `${loadingPercent(load)}%` }} />
           </div>
         </div>
       ) : null}
     </div>
   );
+}
+
+type Loading = Extract<LoadState, { status: 'loading' }>;
+
+const mb = (bytes: number) => (bytes / 2 ** 20).toFixed(1);
+
+function loadingText(l: Loading): string {
+  if (l.phase === 'manifest') return 'Loading clips…';
+  if (l.phase === 'first-frame') return 'Preparing the first frame…';
+  return l.total > 0 ? `Loading clips: ${mb(l.done)} / ${mb(l.total)} MB` : `Loading clips: ${mb(l.done)} MB`;
+}
+
+function loadingPercent(l: Loading): number {
+  if (l.phase === 'first-frame') return 100;
+  if (l.phase === 'clips' && l.total > 0) return Math.min(100, (100 * l.done) / l.total);
+  return 0;
 }
