@@ -1570,6 +1570,9 @@ h2[tabindex='-1']:focus-visible {
   position: absolute;
   top: 34px;
   height: 44px;
+  min-width: 10px;
+  /* Centred on the cut, also when min-width wins at low zoom. */
+  translate: -50% 0;
   z-index: 3;
   border: 1px dashed var(--muted);
   border-radius: var(--radius-sm);

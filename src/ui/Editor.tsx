@@ -690,13 +690,13 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
   // --- render ----------------------------------------------------------------
 
   const mod = modKey;
-  // A cut picked with + and still waiting for a preset: show where the transition will land,
-  // at the width it would get (the previewed preset, else the first one).
+  // A cut picked with + and still waiting for a preset: mark where the transition will land,
+  // if one fits there (the previewed preset, else the first one).
   const pendingCandidate =
     tab === 'transitions' && targetCut && !targetTransition
       ? candidateAt(targetCut, previewId ?? PRESETS[0]!.id)
       : null;
-  const pendingSlot = pendingCandidate ? { cutKey: pendingCandidate.cutKey, duration: pendingCandidate.duration } : null;
+  const pendingCutKey = pendingCandidate?.cutKey ?? null;
 
   const cutNumber = targetCut ? targetCut.index + 1 : 0;
   const cutLabel = targetCut ? `Cut ${cutNumber} · ${targetCut.from.label} → ${targetCut.to.label}` : null;
@@ -901,7 +901,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
         ppf={ppf}
         selection={selection}
         targetCutKey={targetCut?.key ?? null}
-        pendingSlot={pendingSlot}
+        pendingCutKey={pendingCutKey}
         pickerActive={tab === 'transitions' && !selectedTransition && (pickerActive || preview.active)}
         pickerId={pickerId}
         dropIndex={libDrag?.index ?? null}

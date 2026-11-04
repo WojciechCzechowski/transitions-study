@@ -31,6 +31,9 @@ export interface TimelineApi {
 /** How far (px) from a cut, or from its transition's edges, a preset drop still lands on it. */
 const CUT_DROP_PX = 28;
 
+/** Width of the placeholder at a cut picked with +: a marker only, not the transition's length. */
+const PENDING_SLOT_FRAMES: Frames = 6;
+
 interface Props {
   doc: Doc;
   playhead: Frames;
@@ -39,8 +42,8 @@ interface Props {
   ppf: number;
   selection: Selection;
   targetCutKey: string | null;
-  /** A cut picked with + that has no transition yet, and the duration one would get there. */
-  pendingSlot: { readonly cutKey: string; readonly duration: Frames } | null;
+  /** A cut picked with + that has no transition yet; it gets a placeholder slot. */
+  pendingCutKey: string | null;
   /** The Transitions picker is in use: show the target cut's handles. */
   pickerActive: boolean;
   pickerId: string;
@@ -414,10 +417,10 @@ export function Timeline(props: Props) {
                     />
                   ) : (
                     <>
-                      {props.pendingSlot?.cutKey === cut.key && (
+                      {props.pendingCutKey === cut.key && (
                         <div
                           className="transition-slot"
-                          style={{ left: x(cut.frame - props.pendingSlot.duration / 2), width: x(props.pendingSlot.duration) }}
+                          style={{ left: x(cut.frame), width: x(PENDING_SLOT_FRAMES) }}
                           aria-hidden="true"
                         />
                       )}
