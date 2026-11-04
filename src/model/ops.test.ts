@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutAt, FEEL, generous, makeDoc, noHandleB, shortB, SOURCES } from './fixtures';
+import { cutAt, generous, makeDoc, noHandleB, shortB, SOURCES } from './fixtures';
 import {
   applyTransition,
   deleteClip,
@@ -8,7 +8,10 @@ import {
   moveClip,
   removeTransition,
   setDuration,
+  resetTuning,
+  setEasing,
   setFeel,
+  setIntensity,
   splitClip,
   trimBounds,
   trimClip,
@@ -18,7 +21,7 @@ import { clipStarts, cuts, timelineLength, transitionAt, transitionRange, type D
 const HANDLES = { head: 30, tail: 30 };
 
 function applied(doc: Doc, presetId = 'push', feel = 50, n = 0): Doc {
-  const r = applyTransition(doc, cutAt(doc, n).key, presetId, FEEL, { feel });
+  const r = applyTransition(doc, cutAt(doc, n).key, presetId, { feel, duration: 24 });
   if (!r.ok) throw new Error('expected apply to succeed');
   return r.doc;
 }
@@ -26,10 +29,10 @@ function applied(doc: Doc, presetId = 'push', feel = 50, n = 0): Doc {
 const only = (doc: Doc) => doc.transitions[0];
 
 describe('applyTransition', () => {
-  it('creates one transition centred on the cut, sized by Feel', () => {
+  it('creates one transition centred on the cut at the requested duration', () => {
     const doc = shortB();
     const cut = cutAt(doc);
-    const r = applyTransition(doc, cut.key, 'push', FEEL, { feel: 50 });
+    const r = applyTransition(doc, cut.key, 'push', { feel: 50, duration: 24 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(only(r.doc)).toMatchObject({ id: 't3', fromId: 'c1', toId: 'c2', presetId: 'push', duration: 24, feel: 50 });
@@ -41,14 +44,14 @@ describe('applyTransition', () => {
   });
 
   it('clamps a new transition to the available handles and reports it', () => {
-    const r = applyTransition(shortB(), 'c1|c2', 'wipe', FEEL, { feel: 100 });
+    const r = applyTransition(shortB(), 'c1|c2', 'wipe', { feel: 100, duration: 40 });
     expect(r.ok && only(r.doc)?.duration).toBe(36);
     expect(r.ok && r.clamped).toBe('max');
   });
 
   it('replacing the preset keeps duration and feel', () => {
     const first = setDuration(applied(generous(), 'push', 20), 'c1|c2', 30).doc;
-    const r = applyTransition(first, 'c1|c2', 'blur', FEEL, { feel: 90 });
+    const r = applyTransition(first, 'c1|c2', 'blur', { feel: 90, duration: 36 });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.replaced).toBe(true);
@@ -58,12 +61,12 @@ describe('applyTransition', () => {
 
   it('re-applying the same preset is a no-op (same reference)', () => {
     const doc = applied(shortB(), 'zoom');
-    const r = applyTransition(doc, 'c1|c2', 'zoom', FEEL, { feel: 0 });
+    const r = applyTransition(doc, 'c1|c2', 'zoom', { feel: 0, duration: 8 });
     expect(r.ok && r.doc).toBe(doc);
   });
 
   it('refuses with an explanation when a clip has no handle', () => {
-    const r = applyTransition(noHandleB(), 'c1|c2', 'push', FEEL, { feel: 50 });
+    const r = applyTransition(noHandleB(), 'c1|c2', 'push', { feel: 50, duration: 24 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toBe('no-handles');
@@ -71,7 +74,7 @@ describe('applyTransition', () => {
   });
 
   it('refuses an unknown cut', () => {
-    expect(applyTransition(shortB(), 'x|y', 'push', FEEL, { feel: 50 })).toMatchObject({ ok: false, error: 'no-cut' });
+    expect(applyTransition(shortB(), 'x|y', 'push', { feel: 50, duration: 24 })).toMatchObject({ ok: false, error: 'no-cut' });
   });
 });
 
@@ -89,11 +92,49 @@ describe('removeTransition / setDuration / setFeel', () => {
     expect(setDuration(doc, 'c1|c2', 24).doc).toBe(doc);
   });
 
-  it('Feel sets duration and flags the clamp', () => {
-    expect(only(setFeel(applied(generous()), 'c1|c2', 0, FEEL).doc)).toMatchObject({ feel: 0, duration: 8 });
-    const r = setFeel(applied(shortB()), 'c1|c2', 100, FEEL);
-    expect(r.clamped).toBe('max');
-    expect(only(r.doc)).toMatchObject({ feel: 100, duration: 36 });
+  it('Feel never changes duration', () => {
+    const doc = applied(generous());
+    expect(only(setFeel(doc, 'c1|c2', 0))).toMatchObject({ feel: 0, duration: 24 });
+    expect(only(setFeel(doc, 'c1|c2', 100))).toMatchObject({ feel: 100, duration: 24 });
+    expect(setFeel(doc, 'c1|c2', 50)).toBe(doc);
+  });
+});
+
+describe('Fine-tune', () => {
+  const CURVE = [0, 0, 0.58, 1] as const;
+
+  it('overrides easing and intensity without touching Feel or duration', () => {
+    const doc = setIntensity(setEasing(applied(generous()), 'c1|c2', CURVE), 'c1|c2', 0.456);
+    expect(only(doc)).toMatchObject({ feel: 50, duration: 24, easing: CURVE, intensity: 0.46 });
+  });
+
+  it('clamps intensity to 0…1', () => {
+    expect(only(setIntensity(applied(generous()), 'c1|c2', 3))?.intensity).toBe(1);
+    expect(only(setIntensity(applied(generous()), 'c1|c2', -1))?.intensity).toBe(0);
+  });
+
+  it('moving Feel or resetting drops the overrides', () => {
+    const tunedDoc = setIntensity(setEasing(applied(generous()), 'c1|c2', CURVE), 'c1|c2', 0.5);
+    for (const doc of [setFeel(tunedDoc, 'c1|c2', 50), resetTuning(tunedDoc, 'c1|c2')]) {
+      const t = only(doc)!;
+      expect(t.easing).toBeUndefined();
+      expect(t.intensity).toBeUndefined();
+      expect('easing' in t || 'intensity' in t).toBe(false);
+    }
+  });
+
+  it('a preset swap keeps the curve but drops the intensity', () => {
+    const tunedDoc = setIntensity(setEasing(applied(generous()), 'c1|c2', CURVE), 'c1|c2', 0.5);
+    const r = applyTransition(tunedDoc, 'c1|c2', 'wipe', { feel: 50, duration: 24 });
+    expect(r.ok && only(r.doc)).toMatchObject({ presetId: 'wipe', easing: CURVE });
+    expect(r.ok && only(r.doc)?.intensity).toBeUndefined();
+  });
+
+  it('no-op edits keep the same document', () => {
+    const doc = setEasing(applied(generous()), 'c1|c2', CURVE);
+    expect(setEasing(doc, 'c1|c2', [...CURVE])).toBe(doc);
+    const plain = applied(generous());
+    expect(resetTuning(plain, 'c1|c2')).toBe(plain);
   });
 });
 
@@ -232,7 +273,7 @@ describe('a small edit session', () => {
     doc = s.doc; // c1 c2 c4 c3
     const newCut = cuts(doc)[1]!;
     expect(newCut.key).toBe('c2|c4');
-    const r = applyTransition(doc, newCut.key, 'wipe', FEEL, { feel: 50 });
+    const r = applyTransition(doc, newCut.key, 'wipe', { feel: 50, duration: 24 });
     if (!r.ok) throw new Error();
     doc = trimClip(r.doc, 'c4', 'end', 70).doc;
     expect(transitionAt(doc, 'c2|c4')?.duration).toBe(24);

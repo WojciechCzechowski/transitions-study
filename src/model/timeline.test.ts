@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutAt, FEEL, makeDoc, SOURCES, shortB } from './fixtures';
+import { cutAt, makeDoc, SOURCES, shortB } from './fixtures';
 import { nextGalleryIndex } from './galleryNav';
 import { applyTransition, setDuration } from './ops';
 import { clipStarts, createDoc, cuts, normalize, resolveFrame, timelineLength, type Doc } from './timeline';
@@ -7,7 +7,7 @@ import { formatDuration, formatTimecode, roundToEven } from './time';
 
 function withPush(duration: number, doc = shortB(), n = 0): Doc {
   const key = cutAt(doc, n).key;
-  const r = applyTransition(doc, key, 'push', FEEL, { feel: 50 });
+  const r = applyTransition(doc, key, 'push', { feel: 50, duration: 24 });
   if (!r.ok) throw new Error();
   return setDuration(r.doc, key, duration).doc;
 }

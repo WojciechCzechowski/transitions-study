@@ -42,8 +42,3 @@ export function describeNoHandles(cut: Cut, limits: Limits): string {
     `Available: ${a} ${aTail} f after its out point, ${b} ${bHead} f before its in point.`
   );
 }
-
-/** Explains a Feel duration that was cut short by the handles. */
-export function describeFeelClamp(cut: Cut, limits: Limits, requested: Frames): string {
-  return `Feel asks for ${requested} f; ${describeLimit(cut, limits).replace(/^Max/, 'capped at')}.`;
-}

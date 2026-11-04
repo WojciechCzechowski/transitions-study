@@ -588,27 +588,9 @@ h2[tabindex='-1']:focus-visible {
   border-bottom: 1px solid var(--border);
 }
 
-.tpanel-title,
-.tpanel-head .crumb-current {
+.tpanel-title {
   font-size: 15px;
   font-weight: 500;
-}
-
-.crumb-link {
-  font: inherit;
-  font-size: 15px;
-  color: var(--muted);
-  background: none;
-  border: 0;
-  padding: 2px 4px;
-  margin: 0 -4px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.crumb-link:hover {
-  color: var(--text);
-  background: var(--subtle);
 }
 
 .tpanel-sub {
@@ -837,49 +819,178 @@ h2[tabindex='-1']:focus-visible {
   font-weight: 500;
 }
 
-/* --- inspector (level 2) -------------------------------------------------- */
+/* --- transition popover --------------------------------------------------- */
 
-.inspector {
+/* Floats over the selected transition's midpoint, a few px above the clips. */
+.tpopover {
+  position: fixed;
+  z-index: 50;
+  width: 260px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
 }
 
-.inspector-group {
+/* Arrow pointing down at the midpoint. */
+.tpopover::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: var(--arrow-x, 50%);
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transform: rotate(45deg);
+}
+
+.tpopover-head {
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+}
+
+.tpopover-feel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.inspector-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.readout {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 16px;
-  margin: 0;
+  gap: 6px;
   font-size: 13px;
 }
 
-.readout dt {
-  color: var(--muted);
-}
-
-.readout dd {
-  margin: 0;
-  min-width: 0;
+.tpopover-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .feel-label {
   font-weight: 500;
+}
+
+.feel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.link-btn {
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--text);
+}
+
+.tune {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: -4px;
+}
+
+.tune-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.tune-toggle:hover,
+.tune-toggle[aria-expanded='true'] {
+  color: var(--text);
+}
+
+.tune-chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 120ms;
+}
+
+.tune-toggle[aria-expanded='true'] .tune-chevron {
+  transform: rotate(45deg);
+}
+
+.tune-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.tune-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.tune-label {
+  color: var(--muted);
+}
+
+.tune-value {
+  min-width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.curves {
+  display: flex;
+  gap: 6px;
+}
+
+.curve {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.curve:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.curve.on {
+  border-color: var(--select);
+  box-shadow: 0 0 0 1px var(--select);
+  color: var(--text);
+}
+
+.curve path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
 }
 
 .feel-row {
@@ -893,34 +1004,6 @@ h2[tabindex='-1']:focus-visible {
   flex: 1;
   min-width: 0;
   accent-color: var(--primary);
-}
-
-.easing {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.easing code {
-  overflow-wrap: anywhere;
-}
-
-.easing-curve {
-  flex: none;
-  width: 56px;
-  height: 36px;
-}
-
-.easing-frame {
-  fill: none;
-  stroke: var(--border-strong);
-}
-
-.easing-path {
-  fill: none;
-  stroke: var(--primary);
-  stroke-width: 2;
 }
 
 /* --- timeline pane -------------------------------------------------------- */

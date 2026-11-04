@@ -1,4 +1,5 @@
-import { feelToParams, normalizeFeel, type FeelDefinition } from './feel';
+import type { Bezier } from './easing';
+import { normalizeFeel, normalizeIntensity } from './feel';
 import {
   clampDuration,
   clipFromSource,
@@ -38,21 +39,41 @@ export type ApplyResult =
 export interface ApplyOptions {
   /** Feel for a new transition. Ignored when replacing (the existing feel is kept). */
   readonly feel: number;
+  /** Duration for a new transition, clamped to the handles. Ignored when replacing. */
+  readonly duration: Frames;
 }
 
 const withTransitions = (doc: Doc, transitions: readonly Transition[]): Doc => ({ ...doc, transitions });
 
+const replaceTransition = (doc: Doc, from: Transition, to: Transition): Doc =>
+  withTransitions(doc, doc.transitions.map((t) => (t === from ? to : t)));
+
+/** A transition with the given Fine-tune overrides (undefined drops one). */
+function tuned(t: Transition, easing: Bezier | undefined, intensity: number | undefined): Transition {
+  const { id, fromId, toId, presetId, duration, feel } = t;
+  return {
+    id,
+    fromId,
+    toId,
+    presetId,
+    duration,
+    feel,
+    ...(easing !== undefined && { easing }),
+    ...(intensity !== undefined && { intensity }),
+  };
+}
+
 /**
  * Apply a preset as a centred transition on one cut.
- * - No transition there yet: create one; its duration comes from Feel, clamped to the handles.
- * - A transition exists: swap the preset, keeping duration and feel.
+ * - No transition there yet: create one at the given duration, clamped to the handles.
+ * - A transition exists: swap the preset, keeping duration, feel and a Fine-tuned curve.
+ *   A Fine-tuned intensity is dropped, since intensity means something else per preset.
  * - Not enough handle on either side: refuse with the limits so the UI can explain.
  */
 export function applyTransition(
   doc: Doc,
   cutKey: string,
   presetId: string,
-  feelDef: FeelDefinition,
   options: ApplyOptions,
 ): ApplyResult {
   const cut = cutByKey(doc, cutKey);
@@ -66,31 +87,30 @@ export function applyTransition(
     if (existing.presetId === presetId && duration === existing.duration) {
       return { ok: true, doc, replaced: false, clamped: null, transition: existing };
     }
-    const next = { ...existing, presetId, duration };
+    const next = { ...tuned(existing, existing.easing, undefined), presetId, duration };
     return {
       ok: true,
-      doc: withTransitions(doc, doc.transitions.map((t) => (t === existing ? next : t))),
+      doc: replaceTransition(doc, existing, next),
       replaced: true,
       clamped,
       transition: next,
     };
   }
 
-  const feel = normalizeFeel(options.feel);
-  const params = feelToParams(feel, feelDef, limits);
+  const { duration, clamped } = clampDuration(options.duration, limits);
   const transition: Transition = {
     id: `t${doc.nextId}`,
     fromId: cut.from.id,
     toId: cut.to.id,
     presetId,
-    duration: params.duration,
-    feel,
+    duration,
+    feel: normalizeFeel(options.feel),
   };
   return {
     ok: true,
     doc: { ...doc, transitions: [...doc.transitions, transition], nextId: doc.nextId + 1 },
     replaced: false,
-    clamped: params.clamped,
+    clamped,
     transition,
   };
 }
@@ -112,19 +132,38 @@ export function setDuration(doc: Doc, cutKey: string, requested: number): EditRe
   if (!t || !cut) return { doc, clamped: null };
   const { duration, clamped } = clampDuration(requested, getLimits(doc, cut));
   if (duration === t.duration) return { doc, clamped };
-  return { doc: withTransitions(doc, doc.transitions.map((x) => (x === t ? { ...t, duration } : x))), clamped };
+  return { doc: replaceTransition(doc, t, { ...t, duration }), clamped };
 }
 
-/** Feel sets duration, easing and intensity together; duration is clamped to the handles. */
-export function setFeel(doc: Doc, cutKey: string, feel: number, feelDef: FeelDefinition): EditResult {
+/** Feel sets easing and intensity together, replacing any Fine-tune overrides. Duration is untouched. */
+export function setFeel(doc: Doc, cutKey: string, feel: number): Doc {
   const t = transitionAt(doc, cutKey);
-  const cut = cutByKey(doc, cutKey);
-  if (!t || !cut) return { doc, clamped: null };
+  if (!t) return doc;
   const f = normalizeFeel(feel);
-  const params = feelToParams(f, feelDef, getLimits(doc, cut));
-  if (f === t.feel && params.duration === t.duration) return { doc, clamped: params.clamped };
-  const next = { ...t, feel: f, duration: params.duration };
-  return { doc: withTransitions(doc, doc.transitions.map((x) => (x === t ? next : x))), clamped: params.clamped };
+  if (f === t.feel && t.easing === undefined && t.intensity === undefined) return doc;
+  return replaceTransition(doc, t, { ...tuned(t, undefined, undefined), feel: f });
+}
+
+/** Fine-tune: use this curve instead of the one from Feel. */
+export function setEasing(doc: Doc, cutKey: string, easing: Bezier): Doc {
+  const t = transitionAt(doc, cutKey);
+  if (!t || (t.easing && t.easing.every((v, i) => v === easing[i]))) return doc;
+  return replaceTransition(doc, t, tuned(t, easing, t.intensity));
+}
+
+/** Fine-tune: use this intensity (0…1) instead of the one from Feel. */
+export function setIntensity(doc: Doc, cutKey: string, intensity: number): Doc {
+  const t = transitionAt(doc, cutKey);
+  const v = normalizeIntensity(intensity);
+  if (!t || t.intensity === v) return doc;
+  return replaceTransition(doc, t, tuned(t, t.easing, v));
+}
+
+/** Drop the Fine-tune overrides, so Feel drives easing and intensity again. */
+export function resetTuning(doc: Doc, cutKey: string): Doc {
+  const t = transitionAt(doc, cutKey);
+  if (!t || (t.easing === undefined && t.intensity === undefined)) return doc;
+  return replaceTransition(doc, t, tuned(t, undefined, undefined));
 }
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,6 @@ import {
   LAYOUT,
   parseStoredLayout,
   sidebarRange,
-  sidebarView,
   stepSize,
   timelineRange,
 } from './layout';
@@ -68,21 +67,5 @@ describe('parseStoredLayout', () => {
     expect(parseStoredLayout('42')).toEqual(DEFAULT_SIZES);
     expect(parseStoredLayout('{"sidebar":"wide","timeline":-3}')).toEqual(DEFAULT_SIZES);
     expect(parseStoredLayout('{"sidebar":410}')).toEqual({ sidebar: 410, timeline: DEFAULT_SIZES.timeline });
-  });
-});
-
-describe('sidebarView', () => {
-  it('shows the picker without a transition', () => {
-    expect(sidebarView({ hasTransition: false, selected: false, changing: false })).toBe('pick');
-    expect(sidebarView({ hasTransition: false, selected: true, changing: false })).toBe('pick');
-  });
-
-  it('shows the editor only for a selected transition', () => {
-    expect(sidebarView({ hasTransition: true, selected: true, changing: false })).toBe('edit');
-    expect(sidebarView({ hasTransition: true, selected: false, changing: false })).toBe('pick');
-  });
-
-  it('shows the picker while swapping', () => {
-    expect(sidebarView({ hasTransition: true, selected: true, changing: true })).toBe('pick');
   });
 });

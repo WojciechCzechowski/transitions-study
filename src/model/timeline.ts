@@ -1,3 +1,4 @@
+import type { Bezier } from './easing';
 import { assertFrames, clamp, floorToEven, roundToEven, type Frames } from './time';
 
 /** A library item: one prepared clip file. */
@@ -30,7 +31,8 @@ export interface Clip {
 /**
  * A transition centred on the cut between clips `fromId` and `toId`. Duration
  * is always even so it spans exactly duration/2 frames on each side. Easing and
- * intensity are derived from `feel` and the preset config at render time.
+ * intensity are derived from `feel` and the preset config at render time, unless
+ * Fine-tune set them directly.
  */
 export interface Transition {
   readonly id: string;
@@ -40,6 +42,10 @@ export interface Transition {
   readonly duration: Frames;
   /** 0 = snappy … 100 = smooth. */
   readonly feel: number;
+  /** Fine-tune: a curve that replaces the one from Feel. */
+  readonly easing?: Bezier;
+  /** Fine-tune: an intensity that replaces the one from Feel. */
+  readonly intensity?: number;
 }
 
 /** The undoable document: clips back to back, and at most one transition per cut. */
@@ -294,7 +300,8 @@ export type Resolved =
       /** 0…1, sampled at frame centres so it is symmetric around the cut. */
       readonly linear: number;
       readonly presetId: string;
-      readonly feel: number;
+      /** The transition (or preview) drawn here: preset, Feel and any Fine-tune overrides. */
+      readonly look: TransitionLook;
     };
 
 export interface TransitionRange {
@@ -312,6 +319,8 @@ export interface TransitionLook {
   readonly presetId: string;
   readonly duration: Frames;
   readonly feel: number;
+  readonly easing?: Bezier;
+  readonly intensity?: number;
 }
 
 /** Replace (or add, or hide with null) the transition at one cut, for previews. */
@@ -347,7 +356,7 @@ export function resolveFrame(doc: Doc, t: Frames, override?: TransitionOverride)
         to: at(clip, start),
         linear: (tt - (start - look.duration / 2) + 0.5) / look.duration,
         presetId: look.presetId,
-        feel: look.feel,
+        look,
       };
     }
   }
@@ -362,7 +371,7 @@ export function resolveFrame(doc: Doc, t: Frames, override?: TransitionOverride)
         to: at(next, end),
         linear: (tt - (end - look.duration / 2) + 0.5) / look.duration,
         presetId: look.presetId,
-        feel: look.feel,
+        look,
       };
     }
   }
@@ -371,9 +380,19 @@ export function resolveFrame(doc: Doc, t: Frames, override?: TransitionOverride)
 
 // ---------------------------------------------------------------------------
 
+const sameBezier = (a: Bezier | undefined, b: Bezier | undefined) =>
+  a === b || (!!a && !!b && a.every((v, i) => v === b[i]));
+
 const sameTransition = (p: Transition, q: Transition) =>
   p === q ||
-  (p.id === q.id && p.fromId === q.fromId && p.toId === q.toId && p.presetId === q.presetId && p.duration === q.duration && p.feel === q.feel);
+  (p.id === q.id &&
+    p.fromId === q.fromId &&
+    p.toId === q.toId &&
+    p.presetId === q.presetId &&
+    p.duration === q.duration &&
+    p.feel === q.feel &&
+    p.intensity === q.intensity &&
+    sameBezier(p.easing, q.easing));
 
 /** Value equality for documents, used so a drag that ends where it began is not an undo step. */
 export function docEquals(x: Doc, y: Doc): boolean {

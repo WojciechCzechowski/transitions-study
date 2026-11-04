@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { PRESETS } from '../config/transitions.config';
+import { EASING_CURVES, PRESETS } from '../config/transitions.config';
 import { cubicBezier, LINEAR, lerpBezier } from './easing';
-import { feelDuration, feelEasing, feelIntensity, feelToParams } from './feel';
-import { FEEL, generous, limitsAt, shortB } from './fixtures';
+import { feelEasing, feelIntensity, feelToParams, isTuned, tuningParams } from './feel';
+import { FEEL } from './fixtures';
 
 describe('feel mapping', () => {
   it('maps the ends exactly to the snappy and smooth endpoints', () => {
-    expect(feelDuration(0, FEEL)).toBe(8);
-    expect(feelDuration(100, FEEL)).toBe(40);
     expect(feelEasing(0, FEEL)).toEqual(FEEL.snappy.bezier);
     expect(feelEasing(100, FEEL)).toEqual(FEEL.smooth.bezier);
     expect(feelIntensity(0, FEEL)).toBe(1);
@@ -21,47 +19,27 @@ describe('feel mapping', () => {
     expect(feelIntensity(50, FEEL)).toBeCloseTo(0.6);
   });
 
-  it('produces even, monotonic durations across the slider', () => {
-    let prev = -Infinity;
-    for (let f = 0; f <= 100; f++) {
-      const d = feelDuration(f, FEEL);
-      expect(d % 2).toBe(0);
-      expect(d).toBeGreaterThanOrEqual(prev);
-      prev = d;
-    }
-  });
-
   it('clamps out-of-range feel values', () => {
-    expect(feelDuration(-20, FEEL)).toBe(8);
-    expect(feelDuration(500, FEEL)).toBe(40);
+    expect(feelEasing(-20, FEEL)).toEqual(FEEL.snappy.bezier);
+    expect(feelEasing(500, FEEL)).toEqual(FEEL.smooth.bezier);
   });
 
-  it('clamps duration to the handles and flags it', () => {
-    const p = feelToParams(100, FEEL, limitsAt(shortB()));
-    expect(p.requested).toBe(40);
-    expect(p.duration).toBe(36);
-    expect(p.clamped).toBe('max');
-    // Easing and intensity are unaffected by the duration clamp.
-    expect(p.bezier).toEqual(FEEL.smooth.bezier);
+  it('lets Fine-tune overrides win over Feel, one at a time', () => {
+    const curve = [0, 0, 1, 1] as const;
+    expect(tuningParams({ feel: 0 }, FEEL)).toEqual(feelToParams(0, FEEL));
+    expect(tuningParams({ feel: 0, easing: curve }, FEEL)).toEqual({ bezier: curve, intensity: 1 });
+    expect(tuningParams({ feel: 0, intensity: 0.3 }, FEEL)).toEqual({ bezier: FEEL.snappy.bezier, intensity: 0.3 });
+    expect(isTuned({ feel: 0 })).toBe(false);
+    expect(isTuned({ feel: 0, intensity: 0 })).toBe(true);
   });
 
-  it('does not flag when the handles are long enough', () => {
-    const p = feelToParams(100, FEEL, limitsAt(generous()));
-    expect(p).toMatchObject({ duration: 40, clamped: null });
-  });
-
-  it('works with every configured preset', () => {
-    const limits = limitsAt(generous());
+  it('gives valid curves for every configured preset', () => {
     for (const preset of PRESETS) {
-      const snappy = feelToParams(0, preset.feel, limits);
-      const smooth = feelToParams(100, preset.feel, limits);
-      expect(snappy.duration).toBeLessThan(smooth.duration);
-      expect(snappy.duration % 2).toBe(0);
-      expect(smooth.duration % 2).toBe(0);
-      for (const b of [snappy.bezier, smooth.bezier]) {
+      for (const b of [feelEasing(0, preset.feel), feelEasing(100, preset.feel)]) {
         expect(() => cubicBezier(b)).not.toThrow();
       }
     }
+    for (const c of EASING_CURVES) expect(() => cubicBezier(c.bezier)).not.toThrow();
   });
 });
 

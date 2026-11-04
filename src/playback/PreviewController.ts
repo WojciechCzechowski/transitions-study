@@ -9,18 +9,20 @@
 import { getPreset, TRANSITION_DEFAULTS } from '../config/transitions.config';
 import type { FrameStore } from '../media/FrameStore';
 import { cubicBezier, type Bezier } from '../model/easing';
-import { feelEasing, feelIntensity } from '../model/feel';
+import { tuningParams } from '../model/feel';
 import { loopFrameAt, loopRange, onceFrameAt, rebaseElapsed, type LoopRange } from '../model/previewLoop';
 import { clipStarts, cutByKey, resolveFrame, timelineLength, visibleLength, type Doc, type FrameRef, type TransitionOverride } from '../model/timeline';
 import { clamp, FPS, type Frames } from '../model/time';
 import type { Renderer } from '../render/Renderer';
 
-/** What a preview shows: a preset at a duration and feel, centred on one cut. */
+/** What a preview shows: a preset at a duration and feel (plus any Fine-tune overrides), centred on one cut. */
 export interface PreviewCandidate {
   readonly cutKey: string;
   readonly presetId: string;
   readonly duration: Frames;
   readonly feel: number;
+  readonly easing?: Bezier;
+  readonly intensity?: number;
 }
 
 export interface FrameInfo {
@@ -335,8 +337,8 @@ export class PreviewController {
     const from = this.store.get(r.from.sourceId, r.from.frame);
     const to = this.store.get(r.to.sourceId, r.to.frame);
     if (!from || !to) return;
-    const eased = this.ease(feelEasing(r.feel, preset.feel))(r.linear);
-    const intensity = feelIntensity(r.feel, preset.feel);
+    const { bezier, intensity } = tuningParams(r.look, preset.feel);
+    const eased = this.ease(bezier)(r.linear);
     const key = `t|${preset.id}|${r.from.sourceId}:${from.frame}|${r.to.sourceId}:${to.frame}|${eased}|${intensity}|${preset.params.join(',')}`;
     if (key !== this.lastKey) {
       renderer.drawTransition({

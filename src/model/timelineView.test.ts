@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FEEL, cutAt, makeDoc } from './fixtures';
+import { cutAt, makeDoc } from './fixtures';
 import { applyTransition } from './ops';
 import {
   boundaryFrame,
@@ -31,7 +31,7 @@ describe('cutAtFrame', () => {
   });
 
   it('reaches across an existing transition', () => {
-    const r = applyTransition(doc, cutAt(doc, 1).key, 'push', FEEL, { feel: 0 });
+    const r = applyTransition(doc, cutAt(doc, 1).key, 'push', { feel: 0, duration: 8 });
     if (!r.ok) throw new Error('expected a transition');
     const half = r.transition.duration / 2;
     expect(cutAtFrame(r.doc, 100 - half - 4, 5)?.key).toBe(cutAt(r.doc, 1).key);

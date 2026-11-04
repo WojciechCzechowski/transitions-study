@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutAt, FEEL, generous, limitsAt, makeDoc, noHandleB, shortB } from './fixtures';
+import { cutAt, generous, limitsAt, makeDoc, noHandleB, shortB } from './fixtures';
 import { describeLimit, describeNoHandles } from './messages';
 import { applyTransition, setDuration } from './ops';
 import { clampDuration } from './timeline';
@@ -31,7 +31,7 @@ describe('getLimits', () => {
     // A [0,40) · B [40,60) · A [60,100): the middle clip is 20 f long.
     const doc0 = makeDoc({ head: 30, visible: 40 }, { head: 30, visible: 20 }, { head: 30, visible: 40 });
     const k0 = cutAt(doc0, 0).key;
-    const r = applyTransition(doc0, k0, 'push', FEEL, { feel: 50 });
+    const r = applyTransition(doc0, k0, 'push', { feel: 50, duration: 24 });
     if (!r.ok) throw new Error();
     const doc = setDuration(r.doc, k0, 30).doc; // uses 15 f of the middle clip
     expect(limitsAt(doc, 1)).toMatchObject({ max: 10, limitedBy: 'a-length' });

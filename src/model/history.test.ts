@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutAt, FEEL, shortB } from './fixtures';
+import { cutAt, shortB } from './fixtures';
 import {
   beginGesture,
   canRedo,
@@ -104,7 +104,7 @@ describe('gestures', () => {
   it('works on real documents with value equality', () => {
     const doc0 = shortB();
     const key = cutAt(doc0).key;
-    const start = applyTransition(doc0, key, 'push', FEEL, { feel: 50 });
+    const start = applyTransition(doc0, key, 'push', { feel: 50, duration: 24 });
     if (!start.ok) throw new Error();
     let h = createHistory<Doc>(start.doc);
     h = beginGesture(h);

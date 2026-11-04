@@ -1,14 +1,13 @@
 import { lerpBezier, type Bezier } from './easing';
-import { clampDuration, MIN_TRANSITION_DURATION, type ClampResult, type Limits } from './timeline';
-import { clamp, lerp, roundToEven, type Frames } from './time';
+import { clamp, lerp } from './time';
 
 export const FEEL_MIN = 0;
 export const FEEL_MAX = 100;
+export const INTENSITY_MIN = 0;
+export const INTENSITY_MAX = 1;
 
 /** One end of the Feel slider for a preset. */
 export interface FeelEndpoint {
-  /** Duration in frames. Rounded to even when mapped. */
-  readonly frames: Frames;
   readonly bezier: Bezier;
   /** Preset-specific 0…1 strength; see the preset's doc comment in the config. */
   readonly intensity: number;
@@ -19,27 +18,28 @@ export interface FeelDefinition {
   readonly smooth: FeelEndpoint;
 }
 
+/** How a transition moves. Duration is separate: only the timeline edges change it. */
 export interface FeelParams {
-  /** Duration after clamping to the available handles. */
-  readonly duration: Frames;
-  /** Duration Feel asked for before clamping. */
-  readonly requested: Frames;
-  readonly clamped: ClampResult['clamped'];
   readonly bezier: Bezier;
   readonly intensity: number;
+}
+
+/** Feel plus the Fine-tune overrides that replace what Feel gives. */
+export interface Tuning {
+  readonly feel: number;
+  readonly easing?: Bezier;
+  readonly intensity?: number;
 }
 
 export function normalizeFeel(feel: number): number {
   return Math.round(clamp(feel, FEEL_MIN, FEEL_MAX));
 }
 
-const feelT = (feel: number) => normalizeFeel(feel) / FEEL_MAX;
-
-/** Duration Feel asks for, ignoring handle limits. Always even and ≥ the minimum. */
-export function feelDuration(feel: number, def: FeelDefinition): Frames {
-  const raw = lerp(def.snappy.frames, def.smooth.frames, feelT(feel));
-  return Math.max(MIN_TRANSITION_DURATION, roundToEven(raw));
+export function normalizeIntensity(value: number): number {
+  return Math.round(clamp(value, INTENSITY_MIN, INTENSITY_MAX) * 100) / 100;
 }
+
+const feelT = (feel: number) => normalizeFeel(feel) / FEEL_MAX;
 
 export function feelEasing(feel: number, def: FeelDefinition): Bezier {
   return lerpBezier(def.snappy.bezier, def.smooth.bezier, feelT(feel));
@@ -49,15 +49,17 @@ export function feelIntensity(feel: number, def: FeelDefinition): number {
   return lerp(def.snappy.intensity, def.smooth.intensity, feelT(feel));
 }
 
-/** One Feel value → duration, easing and intensity together. */
-export function feelToParams(feel: number, def: FeelDefinition, limits: Limits): FeelParams {
-  const requested = feelDuration(feel, def);
-  const { duration, clamped } = clampDuration(requested, limits);
+/** One Feel value → easing and intensity together. */
+export function feelToParams(feel: number, def: FeelDefinition): FeelParams {
+  return { bezier: feelEasing(feel, def), intensity: feelIntensity(feel, def) };
+}
+
+/** What a transition renders with: each override wins over Feel. */
+export function tuningParams(t: Tuning, def: FeelDefinition): FeelParams {
   return {
-    duration,
-    requested,
-    clamped,
-    bezier: feelEasing(feel, def),
-    intensity: feelIntensity(feel, def),
+    bezier: t.easing ?? feelEasing(t.feel, def),
+    intensity: t.intensity ?? feelIntensity(t.feel, def),
   };
 }
+
+export const isTuned = (t: Tuning) => t.easing !== undefined || t.intensity !== undefined;

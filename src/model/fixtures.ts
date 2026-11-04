@@ -29,6 +29,6 @@ export function cutAt(doc: Doc, n = 0): Cut {
 export const limitsAt = (doc: Doc, n = 0): Limits => getLimits(doc, cutAt(doc, n));
 
 export const FEEL: FeelDefinition = {
-  snappy: { frames: 8, bezier: [0.22, 1, 0.36, 1], intensity: 1 },
-  smooth: { frames: 40, bezier: [0.45, 0, 0.55, 1], intensity: 0.2 },
+  snappy: { bezier: [0.22, 1, 0.36, 1], intensity: 1 },
+  smooth: { bezier: [0.45, 0, 0.55, 1], intensity: 0.2 },
 };

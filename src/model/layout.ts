@@ -1,7 +1,6 @@
 /**
  * Pure layout rules for the resizable workspace: pane size limits, keyboard
- * steps for the splitters, tolerant parsing of the stored sizes, and which
- * level of the Transitions sidebar is showing.
+ * steps for the splitters and tolerant parsing of the stored sizes.
  */
 
 export const LAYOUT = {
@@ -87,14 +86,4 @@ export function parseStoredLayout(raw: string | null | undefined): PaneSizes {
     sidebar: pick(rec.sidebar, DEFAULT_SIZES.sidebar),
     timeline: pick(rec.timeline, DEFAULT_SIZES.timeline),
   };
-}
-
-export type SidebarView = 'pick' | 'edit';
-
-/**
- * Level 2 (edit) shows only for a selected transition that isn't being swapped;
- * everything else shows level 1 (pick).
- */
-export function sidebarView(s: { hasTransition: boolean; selected: boolean; changing: boolean }): SidebarView {
-  return s.hasTransition && s.selected && !s.changing ? 'edit' : 'pick';
 }
