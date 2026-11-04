@@ -33,6 +33,11 @@ export interface PreviewCandidate {
   readonly feel: number;
   readonly easing?: Bezier;
   readonly intensity?: number;
+  /**
+   * The timeline as it would be once this transition is applied, when that
+   * trims the clips at the cut to make room. Shown in place of the current one.
+   */
+  readonly doc?: Doc;
 }
 
 /** A Library clip shown on its own in the preview. */
@@ -233,7 +238,7 @@ export class PreviewController {
    * timeline frame, so presets compare at the same moment.
    */
   preview(candidate: PreviewCandidate, opts: PreviewOptions) {
-    const doc = this.doc;
+    const doc = candidate.doc ?? this.doc;
     if (!doc || !this.ready || candidate.duration < 2) return;
     if (this.mode.kind === 'playing') {
       this.mode = { kind: 'idle' };
@@ -499,10 +504,12 @@ export class PreviewController {
   }
 
   private draw() {
-    const { renderer, doc } = this;
+    const { renderer } = this;
+    const m = this.mode;
+    // A preview that makes room for its transition shows the trimmed timeline.
+    const doc = (m.kind === 'preview' && m.candidate.doc) || this.doc;
     if (!renderer || !doc || !this.ready || renderer.isLost) return;
 
-    const m = this.mode;
     if (m.kind === 'source') {
       this.updateDemand(doc);
       const look = this.store.get(m.state.sourceId, m.state.frame);

@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from 'react';
 import { getPreset } from '../config/transitions.config';
 import { dragDuration, type Edge } from '../model/dragDuration';
-import { describeLimit, describeMinimum } from '../model/messages';
+import { describeLimit, describeMinimum, describeTrim } from '../model/messages';
 import { setDuration } from '../model/ops';
-import type { ClampResult, Cut, Doc, Limits, Transition } from '../model/timeline';
+import { NO_ROOM, type ClampResult, type Cut, type Doc, type Limits, type Room, type Transition } from '../model/timeline';
 import { formatDuration, FPS, type Frames } from '../model/time';
 
 /** Narrower than this, the transition stays fully clickable: a gap would leave too little to click. */
@@ -45,6 +45,8 @@ interface DragState {
   startDuration: Frames;
   baseDoc: Doc;
   announcedLimit: boolean;
+  /** Frames trimmed off the clips (since the drag began) to make room. */
+  trimmed: Room;
 }
 
 /** A transition on one cut: click selects, the edges resize it symmetrically. */
@@ -88,7 +90,7 @@ export function TransitionItem(props: Props) {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     e.currentTarget.focus({ preventScroll: true });
-    drag.current = { edge, pointerId: e.pointerId, startX: e.clientX, startDuration: t.duration, baseDoc: doc, announcedLimit: false };
+    drag.current = { edge, pointerId: e.pointerId, startX: e.clientX, startDuration: t.duration, baseDoc: doc, announcedLimit: false, trimmed: NO_ROOM };
     setDragEdge(edge);
     setLimitHit(null);
     props.onSelect();
@@ -106,7 +108,9 @@ export function TransitionItem(props: Props) {
       props.announce(describeLimit(cut, limits));
     }
     if (r.clamped !== 'max') d.announcedLimit = false;
-    props.gesture.update(setDuration(d.baseDoc, cut.key, r.duration).doc);
+    const next = setDuration(d.baseDoc, cut.key, r.duration);
+    d.trimmed = next.trimmed;
+    props.gesture.update(next.doc);
   };
 
   const onEdgeUp = (e: PointerEvent<HTMLDivElement>) => {
@@ -117,6 +121,7 @@ export function TransitionItem(props: Props) {
     setLimitHit(null);
     props.gesture.end('Change duration');
     props.onGestureActive(false);
+    if (d.trimmed !== NO_ROOM) props.announce(describeTrim(cut, d.trimmed));
   };
 
   const onEdgeKey = (edge: Edge) => (e: KeyboardEvent) => {

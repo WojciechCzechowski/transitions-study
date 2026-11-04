@@ -20,6 +20,7 @@ import {
   visibleLength,
   type ClampResult,
   type Doc,
+  type Room,
 } from '../model/timeline';
 import { boundaryFrame, cutAtFrame, insertionIndex, rulerLabel, tickStep } from '../model/timelineView';
 import { clamp, formatClock, FPS, formatTimecode, type Frames } from '../model/time';
@@ -62,6 +63,8 @@ interface Props {
   /** The cut under a preset drag, and whether it can take a transition. */
   dropCutKey: string | null;
   dropCutValid: boolean;
+  /** Frames that applying a preset at this cut would trim off its clips, to shade them. */
+  trimPreview: { readonly cutKey: string; readonly room: Room } | null;
   /** Focus targets the editor moves focus to. */
   cutEls: Map<string, HTMLButtonElement>;
   transitionEls: Map<string, HTMLButtonElement>;
@@ -417,6 +420,28 @@ export function Timeline(props: Props) {
                             {cut.to.label} head · {bHead} f
                           </span>
                         </div>
+                      </>
+                    )}
+                    {props.trimPreview?.cutKey === cut.key && (
+                      <>
+                        {props.trimPreview.room.a > 0 && (
+                          <div
+                            className="trim-preview"
+                            style={{ left: x(cut.frame - props.trimPreview.room.a), width: x(props.trimPreview.room.a) }}
+                            aria-hidden="true"
+                          >
+                            <span>−{props.trimPreview.room.a} f</span>
+                          </div>
+                        )}
+                        {props.trimPreview.room.b > 0 && (
+                          <div
+                            className="trim-preview"
+                            style={{ left: x(cut.frame), width: x(props.trimPreview.room.b) }}
+                            aria-hidden="true"
+                          >
+                            <span>−{props.trimPreview.room.b} f</span>
+                          </div>
+                        )}
                       </>
                     )}
                     {t ? (

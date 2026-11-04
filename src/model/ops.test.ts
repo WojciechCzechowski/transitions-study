@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutAt, generous, makeDoc, noHandleB, shortB, SOURCES } from './fixtures';
+import { cutAt, generous, makeDoc, noHandleB, shortB, SOURCES, tooShortB } from './fixtures';
 import {
   applyTransition,
   deleteClip,
@@ -18,9 +18,7 @@ import {
   trimBounds,
   trimClip,
 } from './ops';
-import { clipStarts, cuts, timelineLength, transitionAt, transitionRange, type Doc } from './timeline';
-
-const HANDLES = { head: 30, tail: 30 };
+import { clipStarts, cuts, NO_ROOM, timelineLength, transitionAt, transitionRange, type Doc } from './timeline';
 
 function applied(doc: Doc, presetId = 'push', feel = 50, n = 0): Doc {
   const r = applyTransition(doc, cutAt(doc, n).key, presetId, { feel, duration: 24 });
@@ -45,10 +43,58 @@ describe('applyTransition', () => {
     expect(doc.transitions).toHaveLength(0);
   });
 
-  it('clamps a new transition to the available handles and reports it', () => {
-    const r = applyTransition(shortB(), 'c1|c2', 'wipe', { feel: 100, duration: 40 });
-    expect(r.ok && only(r.doc)?.duration).toBe(36);
-    expect(r.ok && r.clamped).toBe('max');
+  it('trims nothing when the handles are enough', () => {
+    const doc = shortB();
+    const r = applyTransition(doc, 'c1|c2', 'wipe', { feel: 100, duration: 36 });
+    if (!r.ok) throw new Error();
+    expect(r.trimmed).toBe(NO_ROOM);
+    expect(r.doc.clips).toEqual(doc.clips);
+  });
+
+  it('trims only the short side, by what its handle lacks, and ripples', () => {
+    const doc = shortB(); // A tail 45, B head 18
+    const r = applyTransition(doc, 'c1|c2', 'wipe', { feel: 100, duration: 40 });
+    if (!r.ok) throw new Error();
+    expect(only(r.doc)?.duration).toBe(40);
+    expect(r.clamped).toBe(null);
+    expect(r.trimmed).toEqual({ a: 0, b: 2 });
+    expect(r.doc.clips[0]).toEqual(doc.clips[0]);
+    expect(r.doc.clips[1]).toMatchObject({ sourceIn: 20, sourceOut: 78 });
+    expect(timelineLength(r.doc)).toBe(timelineLength(doc) - 2);
+  });
+
+  it('trims both clips when neither has a handle, shifting later clips and transitions', () => {
+    const full = { head: 0, visible: 120 };
+    let doc = makeDoc(full, full, full);
+    const first = applyTransition(doc, 'c1|c2', 'push', { feel: 50, duration: 24 });
+    if (!first.ok) throw new Error();
+    expect(first.trimmed).toEqual({ a: 12, b: 12 });
+    doc = first.doc;
+    expect(doc.clips.map((c) => [c.sourceIn, c.sourceOut])).toEqual([[0, 108], [12, 120], [0, 120]]);
+    expect(cuts(doc).map((c) => c.frame)).toEqual([108, 216]);
+
+    const second = applyTransition(doc, 'c2|c3', 'push', { feel: 50, duration: 24 });
+    if (!second.ok) throw new Error();
+    expect(second.trimmed).toEqual({ a: 12, b: 12 });
+    expect(second.doc.transitions.map((t) => t.duration)).toEqual([24, 24]);
+    expect(cuts(second.doc).map((c) => c.frame)).toEqual([108, 204]);
+    expect(timelineLength(second.doc)).toBe(360 - 48);
+  });
+
+  it('clamps a new transition to what the clips can give and reports it', () => {
+    const r = applyTransition(shortB(), 'c1|c2', 'wipe', { feel: 100, duration: 200 });
+    if (!r.ok) throw new Error();
+    expect(only(r.doc)?.duration).toBe(78);
+    expect(r.clamped).toBe('max');
+    expect(r.trimmed).toEqual({ a: 0, b: 21 });
+  });
+
+  it('replacing the preset trims nothing more', () => {
+    const doc = applied(noHandleB());
+    const r = applyTransition(doc, 'c1|c2', 'blur', { feel: 50, duration: 60 });
+    if (!r.ok) throw new Error();
+    expect(r.trimmed).toBe(NO_ROOM);
+    expect(r.doc.clips).toEqual(doc.clips);
   });
 
   it('replacing the preset keeps duration and feel', () => {
@@ -67,12 +113,12 @@ describe('applyTransition', () => {
     expect(r.ok && r.doc).toBe(doc);
   });
 
-  it('refuses with an explanation when a clip has no handle', () => {
-    const r = applyTransition(noHandleB(), 'c1|c2', 'push', { feel: 50, duration: 24 });
+  it('refuses with an explanation when a clip is too short to make room', () => {
+    const r = applyTransition(tooShortB(), 'c1|c2', 'push', { feel: 50, duration: 24 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toBe('no-handles');
-    expect(r.limits?.available).toMatchObject({ aTail: 45, bHead: 0 });
+    expect(r.limits?.available).toMatchObject({ bHead: 0, bLength: 1 });
   });
 
   it('refuses an unknown cut', () => {
@@ -87,11 +133,29 @@ describe('removeTransition / setDuration / setFeel', () => {
     expect(removeTransition(doc, 'c1|c2')).toBe(doc);
   });
 
-  it('keeps duration even and stops at the handle limit', () => {
+  it('keeps duration even and stops at what the clips can give', () => {
     expect(only(setDuration(applied(shortB()), 'c1|c2', 13).doc)?.duration).toBe(14);
     expect(setDuration(applied(shortB()), 'c1|c2', 80)).toMatchObject({ clamped: 'max' });
     const doc = applied(shortB());
     expect(setDuration(doc, 'c1|c2', 24).doc).toBe(doc);
+  });
+
+  it('trims to make room when growing, and leaves the handles when shrinking', () => {
+    const doc = applied(noHandleB()); // 24 f: B trimmed by 12
+    expect(doc.clips[1]).toMatchObject({ sourceIn: 12 });
+
+    const grown = setDuration(doc, 'c1|c2', 40);
+    expect(grown.trimmed).toEqual({ a: 0, b: 8 });
+    expect(grown.doc.clips[1]).toMatchObject({ sourceIn: 20 });
+    expect(only(grown.doc)?.duration).toBe(40);
+
+    const shrunk = setDuration(grown.doc, 'c1|c2', 10);
+    expect(shrunk.trimmed).toBe(NO_ROOM);
+    expect(shrunk.doc.clips).toEqual(grown.doc.clips);
+    expect(only(shrunk.doc)?.duration).toBe(10);
+
+    // Within the handles it now has, growing again trims nothing.
+    expect(setDuration(shrunk.doc, 'c1|c2', 40).trimmed).toBe(NO_ROOM);
   });
 
   it('Feel never changes duration', () => {
@@ -141,28 +205,27 @@ describe('Fine-tune', () => {
 });
 
 describe('insertClip', () => {
-  it('leaves handles on a new instance', () => {
-    expect(insertRange(120, HANDLES)).toEqual({ sourceIn: 30, sourceOut: 90 });
-    expect(insertRange(41, HANDLES)).toEqual({ sourceIn: 20, sourceOut: 21 });
-    expect(insertRange(1, HANDLES)).toEqual({ sourceIn: 0, sourceOut: 1 });
+  it('adds the whole source', () => {
+    expect(insertRange(120)).toEqual({ sourceIn: 0, sourceOut: 120 });
+    expect(insertRange(1)).toEqual({ sourceIn: 0, sourceOut: 1 });
   });
 
   it('inserts at a boundary and shifts later clips', () => {
-    const { doc, clip } = insertClip(shortB(), SOURCES[0], 1, HANDLES);
-    expect(clip).toMatchObject({ id: 'c3', sourceId: 'a', sourceIn: 30, sourceOut: 90 });
+    const { doc, clip } = insertClip(shortB(), SOURCES[0], 1);
+    expect(clip).toMatchObject({ id: 'c3', sourceId: 'a', sourceIn: 0, sourceOut: 120 });
     expect(doc.clips.map((c) => c.id)).toEqual(['c1', 'c3', 'c2']);
-    expect(clipStarts(doc)).toEqual([0, 60, 120]);
-    expect(timelineLength(doc)).toBe(180);
+    expect(clipStarts(doc)).toEqual([0, 60, 180]);
+    expect(timelineLength(doc)).toBe(240);
     expect(doc.nextId).toBe(4);
   });
 
   it('can add the same source many times, and drops a transition whose cut it splits', () => {
     let doc = applied(shortB());
-    doc = insertClip(doc, SOURCES[0], 2, HANDLES).doc;
-    doc = insertClip(doc, SOURCES[0], 2, HANDLES).doc;
+    doc = insertClip(doc, SOURCES[0], 2).doc;
+    doc = insertClip(doc, SOURCES[0], 2).doc;
     expect(doc.clips.filter((c) => c.sourceId === 'a')).toHaveLength(3);
     expect(doc.transitions).toHaveLength(1);
-    doc = insertClip(doc, SOURCES[1], 1, HANDLES).doc;
+    doc = insertClip(doc, SOURCES[1], 1).doc;
     expect(doc.transitions).toHaveLength(0);
   });
 });
@@ -225,7 +288,7 @@ describe('insertAtFrame', () => {
 
 describe('moveClip and deleteClip', () => {
   it('reorders, keeping the order unchanged for a no-op move', () => {
-    const doc = insertClip(shortB(), SOURCES[0], 2, HANDLES).doc; // c1 c2 c3
+    const doc = insertClip(shortB(), SOURCES[0], 2).doc; // c1 c2 c3
     expect(moveClip(doc, 'c1', 0)).toBe(doc);
     expect(moveClip(doc, 'c1', 1)).toBe(doc);
     expect(moveClip(doc, 'c1', 3).clips.map((c) => c.id)).toEqual(['c2', 'c3', 'c1']);
@@ -233,17 +296,17 @@ describe('moveClip and deleteClip', () => {
   });
 
   it('drops transitions that lose their pair on a move', () => {
-    const doc = applied(insertClip(shortB(), SOURCES[0], 2, HANDLES).doc); // transition on c1|c2
+    const doc = applied(insertClip(shortB(), SOURCES[0], 2).doc); // transition on c1|c2
     expect(moveClip(doc, 'c3', 0).transitions).toHaveLength(1);
     expect(moveClip(doc, 'c2', 0).transitions).toHaveLength(0);
   });
 
   it('ripple-deletes a clip with the transitions on its cuts', () => {
-    const doc = applied(insertClip(shortB(), SOURCES[0], 2, HANDLES).doc);
+    const doc = applied(insertClip(shortB(), SOURCES[0], 2).doc);
     const r = deleteClip(doc, 'c2');
     expect(r.clips.map((c) => c.id)).toEqual(['c1', 'c3']);
     expect(r.transitions).toHaveLength(0);
-    expect(timelineLength(r)).toBe(120);
+    expect(timelineLength(r)).toBe(60 + 120);
   });
 
   it('can delete every clip, leaving an empty timeline', () => {
@@ -255,7 +318,7 @@ describe('moveClip and deleteClip', () => {
     expect(cuts(none)).toEqual([]);
     expect(splitClip(none, 0)).toEqual({ ok: false, reason: 'outside' });
     // A clip can be dropped back onto the empty timeline.
-    const back = insertClip(none, SOURCES[0], 0, HANDLES).doc;
+    const back = insertClip(none, SOURCES[0], 0).doc;
     expect(back.clips).toHaveLength(1);
   });
 });
@@ -332,7 +395,7 @@ describe('trimClip', () => {
 describe('a small edit session', () => {
   it('insert, split, transition on the new cut, trim and delete stay consistent', () => {
     let doc = makeDoc({ head: 15, visible: 60 }, { head: 18, visible: 60 });
-    doc = insertClip(doc, SOURCES[1], 2, HANDLES).doc; // c1 c2 c3
+    doc = insertClip(doc, SOURCES[1], 2).doc; // c1 c2 c3
     const s = splitClip(doc, 90); // inside c2
     if (!s.ok) throw new Error();
     doc = s.doc; // c1 c2 c4 c3

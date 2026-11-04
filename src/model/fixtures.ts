@@ -14,10 +14,12 @@ export function makeDoc(...layout: ClipLayout[]): Doc {
   return r.doc;
 }
 
-/** The starting timeline: A tail 45 f, B head 18 f → max 36 f. */
+/** The starting timeline: A tail 45 f, B head 18 f → fits 36 f untrimmed. */
 export const shortB = () => makeDoc({ head: 15, visible: 60 }, { head: 18, visible: 60 });
 export const generous = () => makeDoc({ head: 15, visible: 60 }, { head: 45, visible: 60 });
 export const noHandleB = () => makeDoc({ head: 15, visible: 60 }, { head: 0, visible: 60 });
+/** B is a single frame with no handle: nothing to trim into one, so no transition fits. */
+export const tooShortB = () => makeDoc({ head: 15, visible: 60 }, { head: 0, visible: 1 });
 
 /** The n-th cut of a document (throws if missing). */
 export function cutAt(doc: Doc, n = 0): Cut {

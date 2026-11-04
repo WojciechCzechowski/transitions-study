@@ -26,11 +26,11 @@ describe('edge drag → duration', () => {
     expect(pxToFrames(10, 0)).toBe(0);
   });
 
-  it('stops at the handle limit and reports the clamp', () => {
-    const limits = limitsAt(shortB()); // max 36
-    const r = dragDuration(24, 'right', 200, 7.5, limits);
-    expect(r).toMatchObject({ duration: 36, clamped: 'max' });
-    expect(r.requested).toBeGreaterThan(36);
+  it('stops at the limit and reports the clamp', () => {
+    const limits = limitsAt(shortB()); // max 78
+    const r = dragDuration(24, 'right', 400, 7.5, limits);
+    expect(r).toMatchObject({ duration: 78, clamped: 'max' });
+    expect(r.requested).toBeGreaterThan(78);
   });
 
   it('stops at the minimum', () => {

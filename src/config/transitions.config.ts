@@ -133,7 +133,7 @@ export const EASING_CURVES: readonly { readonly id: string; readonly name: strin
 export const TRANSITION_DEFAULTS = {
   /** Feel used for a brand-new transition and for previews before one exists. */
   feel: 50,
-  /** Duration (frames, even) of a brand-new transition, before the handles cap it. */
+  /** Duration (frames, even) of a brand-new transition, before the clips' length caps it. */
   duration: 24,
   preview: {
     /** Frames of clip A shown before the transition starts in the gallery loop. */

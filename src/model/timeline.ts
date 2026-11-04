@@ -171,15 +171,20 @@ export function createDoc(sources: readonly Source[], layout: readonly ClipLayou
 // ---------------------------------------------------------------------------
 // Duration limits
 
-/** What caps the maximum duration. Handles are listed first so they win ties. */
-export type LimitSource = 'a-tail' | 'b-head' | 'a-length' | 'b-length';
+/** What caps the maximum duration: how much each clip can give once it is trimmed to make room. */
+export type LimitSource = 'a-length' | 'b-length';
 
 export interface Limits {
   readonly min: Frames;
-  /** Largest even duration that fits; 0 when no centred transition is possible. */
+  /**
+   * Largest even duration reachable, trimming the clips at the cut to make
+   * room when their handles are short; 0 when no centred transition is possible.
+   */
   readonly max: Frames;
   readonly canTransition: boolean;
   readonly limitedBy: LimitSource;
+  /** Largest even duration that fits the current handles without trimming (may be 0). */
+  readonly fit: Frames;
   /** Frames available on each side of the cut, per constraint. */
   readonly available: {
     readonly aTail: Frames;
@@ -194,10 +199,20 @@ export interface Limits {
 const halfOf = (t: Transition | null) => (t ? t.duration / 2 : 0);
 
 /**
+ * Half-width one side can give: `handle` frames already past the edit point,
+ * plus visible frames trimmed off to become handle. Trimming x frames turns x
+ * of length into handle, so the half h needs h ≤ length − max(0, h − handle).
+ */
+const reachHalf = (handle: Frames, length: Frames): Frames =>
+  Math.max(0, Math.min(length, Math.floor((length + handle) / 2)));
+
+/**
  * A centred transition of duration D needs D/2 frames of the outgoing clip's
  * tail handle and D/2 frames of the incoming clip's head handle. It also cannot
  * reach past either clip's visible range, which it shares with a transition at
  * that clip's other end (two transitions never overlap inside one clip).
+ * When a handle is short, the clip is trimmed to make one (see `roomFor`), so
+ * the ceiling (`max`) is set by clip length; `fit` is what fits untrimmed.
  */
 export function getLimits(doc: Doc, cut: Cut): Limits {
   const before = cut.index > 0 ? transitionAt(doc, cutKeyOf(doc.clips[cut.index - 1]!.id, cut.from.id)) : null;
@@ -209,28 +224,37 @@ export function getLimits(doc: Doc, cut: Cut): Limits {
     aLength: visibleLength(cut.from) - halfOf(before),
     bLength: visibleLength(cut.to) - halfOf(after),
   };
-  const candidates: [LimitSource, Frames][] = [
-    ['a-tail', available.aTail],
-    ['b-head', available.bHead],
-    ['a-length', available.aLength],
-    ['b-length', available.bLength],
-  ];
-  let limitedBy: LimitSource = 'a-tail';
-  let half = Infinity;
-  for (const [source, frames] of candidates) {
-    if (frames < half) {
-      half = frames;
-      limitedBy = source;
-    }
-  }
-  const max = floorToEven(Math.max(0, half) * 2);
+  const fitHalf = Math.min(available.aTail, available.bHead, available.aLength, available.bLength);
+  const fit = floorToEven(Math.max(0, fitHalf) * 2);
+  const aHalf = reachHalf(available.aTail, available.aLength);
+  const bHalf = reachHalf(available.bHead, available.bLength);
+  const max = floorToEven(Math.min(aHalf, bHalf) * 2);
+  const ok = max >= MIN_TRANSITION_DURATION;
   return {
     min: MIN_TRANSITION_DURATION,
-    max: max >= MIN_TRANSITION_DURATION ? max : 0,
-    canTransition: max >= MIN_TRANSITION_DURATION,
-    limitedBy,
+    max: ok ? max : 0,
+    canTransition: ok,
+    limitedBy: aHalf <= bHalf ? 'a-length' : 'b-length',
+    fit: fit >= MIN_TRANSITION_DURATION ? fit : 0,
     available,
   };
+}
+
+/** Frames to trim off each clip at the cut so a centred transition of `duration` has its handles. */
+export interface Room {
+  /** Off the outgoing clip's end. */
+  readonly a: Frames;
+  /** Off the incoming clip's start. */
+  readonly b: Frames;
+}
+
+export const NO_ROOM: Room = { a: 0, b: 0 };
+
+export function roomFor(cut: Cut, duration: Frames): Room {
+  const half = Math.max(0, duration / 2);
+  const a = Math.max(0, half - tailHandle(cut.from));
+  const b = Math.max(0, half - headHandle(cut.to));
+  return a === 0 && b === 0 ? NO_ROOM : { a, b };
 }
 
 export interface ClampResult {
@@ -251,7 +275,8 @@ export function clampDuration(requested: number, limits: Limits): ClampResult {
 /**
  * Bring transitions back in line with the clips: drop any whose two clips are
  * no longer adjacent (or that no longer fit at all), and shrink the rest to
- * their current limits. Returns the same reference when nothing changed.
+ * what their current handles hold (`fit`; normalize never trims clips).
+ * Returns the same reference when nothing changed.
  */
 export function normalize(doc: Doc): Doc {
   const order = new Map(cuts(doc).map((c) => [c.key, c] as const));
@@ -271,10 +296,10 @@ export function normalize(doc: Doc): Doc {
     const cut = order.get(transitionCutKey(t))!;
     const limits = getLimits(working, cut);
     const list = working.transitions;
-    if (!limits.canTransition) {
+    if (limits.fit === 0) {
       working = { ...working, transitions: list.filter((x) => x !== t) };
-    } else if (t.duration > limits.max) {
-      const next = { ...t, duration: limits.max };
+    } else if (t.duration > limits.fit) {
+      const next = { ...t, duration: limits.fit };
       working = { ...working, transitions: list.map((x) => (x === t ? next : x)) };
     }
   }

@@ -1,6 +1,5 @@
 import { Pause, Play, X } from 'lucide-react';
 import { useRef, useSyncExternalStore, type PointerEvent } from 'react';
-import { LIBRARY_INSERT } from '../config/study.config';
 import { hasMarks, markedRange, type Marks } from '../model/marks';
 import { clamp, formatSeconds, formatTimecode, type Frames } from '../model/time';
 import type { PreviewController } from '../playback/PreviewController';
@@ -33,8 +32,8 @@ export function SourceControls({ controller, marks, onMarkIn, onMarkOut, onClear
   const marked = hasMarks(marks);
   const rangeIn = marks?.in ?? 0;
   const rangeOut = marks?.out ?? last;
-  // What Insert or a drag adds: the marked part, or the default range.
-  const added = markedRange(source.frames, marks, LIBRARY_INSERT);
+  // What Insert or a drag adds: the marked part, or the whole clip.
+  const added = markedRange(source.frames, marks);
   const addedLabel = formatSeconds(added.sourceOut - added.sourceIn);
 
   const seekAt = (clientX: number) => {

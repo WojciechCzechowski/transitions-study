@@ -1,4 +1,4 @@
-import { insertRange, type InsertHandles, type SourceRange } from './ops';
+import { insertRange, type SourceRange } from './ops';
 import type { Frames } from './time';
 
 /** In and out marks on a Library clip, both inclusive source frames. Either may be unset. */
@@ -23,12 +23,11 @@ export function markOut(m: Marks, frame: Frames): Marks {
 
 /**
  * The part of a source a Library clip adds to the timeline. Without marks it
- * is the default (handles left on both sides, so its cuts take transitions).
- * With only an in mark it runs to the end; with only an out mark it starts at
- * the beginning.
+ * is the whole source. With only an in mark it runs to the end; with only an
+ * out mark it starts at the beginning.
  */
-export function markedRange(frames: Frames, m: Marks | undefined, handles: InsertHandles): SourceRange {
-  if (!m || !hasMarks(m)) return insertRange(frames, handles);
+export function markedRange(frames: Frames, m: Marks | undefined): SourceRange {
+  if (!m || !hasMarks(m)) return insertRange(frames);
   const last = Math.max(0, frames - 1);
   const start = Math.max(0, Math.min(last, m.in ?? 0));
   const end = Math.max(start, Math.min(last, m.out ?? last));

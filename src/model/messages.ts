@@ -1,24 +1,21 @@
 import { formatDuration, formatSeconds, type Frames } from './time';
-import type { Cut, Limits } from './timeline';
+import type { Cut, Limits, Room } from './timeline';
 
 const frames = (n: Frames) => `${n} frame${n === 1 ? '' : 's'}`;
 
-/** Why the duration cannot grow further, e.g. for the drag tooltip at the limit. */
+/**
+ * Why the duration cannot grow further, e.g. for the drag tooltip at the limit.
+ * Short handles are trimmed to make room, so only a clip's length stops it.
+ */
 export function describeLimit(cut: Cut, limits: Limits): string {
   const max = `Max ${limits.max} f (${formatSeconds(limits.max)})`;
-  const { available } = limits;
-  const a = cut.from.label;
-  const b = cut.to.label;
-  switch (limits.limitedBy) {
-    case 'a-tail':
-      return `${max}: ${a} has only ${frames(available.aTail)} after its out point`;
-    case 'b-head':
-      return `${max}: ${b} has only ${frames(available.bHead)} before its in point`;
-    case 'a-length':
-      return `${max}: ${a} has only ${frames(available.aLength)} of length to spare`;
-    case 'b-length':
-      return `${max}: ${b} has only ${frames(available.bLength)} of length to spare`;
-  }
+  const { aTail, bHead, aLength, bLength } = limits.available;
+  const side = (label: string, length: Frames, handle: Frames, where: string) =>
+    `${label} has only ${frames(length)} of length to spare` +
+    (handle > 0 && handle < length ? ` and ${frames(handle)} ${where}` : '');
+  return limits.limitedBy === 'a-length'
+    ? `${max}: ${side(cut.from.label, aLength, aTail, 'after its out point')}`
+    : `${max}: ${side(cut.to.label, bLength, bHead, 'before its in point')}`;
 }
 
 /** Short form for the minimum bound. */
@@ -26,19 +23,29 @@ export function describeMinimum(limits: Limits): string {
   return `Min ${formatDuration(limits.min)}: one frame on each side of the cut`;
 }
 
-/** Why no centred transition can be added at all. */
+/** Why no centred transition can be added at all: a clip is too short to give up even one frame. */
 export function describeNoHandles(cut: Cut, limits: Limits): string {
-  const { aTail, bHead, aLength, bLength } = limits.available;
-  const a = cut.from.label;
-  const b = cut.to.label;
-  const missing: string[] = [];
-  if (aTail < 1) missing.push(`${a} has 0 frames after its out point`);
-  if (bHead < 1) missing.push(`${b} has 0 frames before its in point`);
-  if (aTail >= 1 && bHead >= 1 && (aLength < 1 || bLength < 1)) missing.push('a neighbouring transition uses the whole clip');
-  const lead = missing.length ? missing.join(' and ') : 'There are not enough frames around the cut';
-  const first = lead.charAt(0).toUpperCase() + lead.slice(1);
+  const { aLength, bLength } = limits.available;
+  const short: string[] = [];
+  if (limits.limitedBy === 'a-length' || aLength < 2) short.push(`${cut.from.label} has only ${frames(Math.max(0, aLength))} of length to spare`);
+  if (limits.limitedBy === 'b-length' || bLength < 2) short.push(`${cut.to.label} has only ${frames(Math.max(0, bLength))} of length to spare`);
+  const lead = short.join(' and ');
   return (
-    `${first}. A centred transition needs at least 1 frame of handle on each side of the cut. ` +
-    `Available: ${a} ${aTail} f after its out point, ${b} ${bHead} f before its in point.`
+    `${lead}. A centred transition needs at least 1 frame of each clip on its side of the cut, ` +
+    'and 1 past the cut that a clip without handle gives up by being trimmed.'
   );
+}
+
+/** "Clip A by 12 f and Clip B by 6 f": what making room trims, or '' when nothing. */
+export function describeRoom(cut: Cut, room: Room): string {
+  const parts: string[] = [];
+  if (room.a > 0) parts.push(`${cut.from.label} by ${room.a} f`);
+  if (room.b > 0) parts.push(`${cut.to.label} by ${room.b} f`);
+  return parts.join(' and ');
+}
+
+/** Sentence for an announcement after an edit made room, or '' when nothing was trimmed. */
+export function describeTrim(cut: Cut, room: Room): string {
+  const what = describeRoom(cut, room);
+  return what ? `Trimmed ${what} to make room.` : '';
 }

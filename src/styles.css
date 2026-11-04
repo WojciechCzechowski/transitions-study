@@ -2176,6 +2176,39 @@ button.source-pill:hover {
   right: 4px;
 }
 
+/* Clip frames a preset would trim off to make room for its transition. */
+.trim-preview {
+  position: absolute;
+  top: 20px;
+  height: 72px;
+  border: 1px dashed var(--warn);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.trim-preview::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: repeating-linear-gradient(-45deg, var(--warn) 0 2px, transparent 2px 7px);
+  opacity: 0.35;
+}
+
+.trim-preview span {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
 .max-reach {
   position: absolute;
   top: 18px;

@@ -1,6 +1,6 @@
 /**
- * Study harness settings: where clips come from, the starting timeline,
- * Library insert handles and the decoded-frame cache.
+ * Study harness settings: where clips come from, the starting timeline and
+ * the decoded-frame cache.
  */
 import type { ClipLayout } from '../model/timeline';
 
@@ -15,12 +15,6 @@ export const START_LAYOUT: readonly [ClipLayout, ClipLayout] = [
   { head: 15, visible: 60 }, // A: 15 head, 45 tail
   { head: 18, visible: 60 }, // B: 18 head, 42 tail → max centred 36 f
 ];
-
-/**
- * Handles left on a clip dragged in from the Library, so its cuts can take
- * transitions straight away. Shorter sources get smaller handles.
- */
-export const LIBRARY_INSERT = { head: 30, tail: 30 } as const;
 
 /**
  * Frames are decoded on demand (WebCodecs, one keyframe group at a time) into

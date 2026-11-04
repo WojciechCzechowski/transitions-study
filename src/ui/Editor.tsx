@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { BetweenVerticalStart, Minus, Pause, Play, Plus, Redo2, Scan, SquareSplitHorizontal, Undo2 } from 'lucide-react';
-import { LIBRARY_INSERT } from '../config/study.config';
 import { getPreset, PRESETS, TRANSITION_DEFAULTS } from '../config/transitions.config';
 import type { FrameFeeder } from '../media/FrameFeeder';
 import type { ThumbCache } from '../media/ThumbCache';
@@ -22,7 +21,7 @@ import {
   type History,
 } from '../model/history';
 import { markedRange, markIn, markOut, NO_MARKS, type Marks } from '../model/marks';
-import { describeLimit, describeNoHandles } from '../model/messages';
+import { describeLimit, describeNoHandles, describeRoom, describeTrim } from '../model/messages';
 import {
   applyTransition,
   deleteClip,
@@ -47,12 +46,15 @@ import {
   cuts,
   docEquals,
   getLimits,
+  NO_ROOM,
+  roomFor,
   timelineLength,
   transitionAt,
   transitionById,
   transitionCutKey,
   type Cut,
   type Doc,
+  type Room,
   type Source,
 } from '../model/timeline';
 import { clampZoom, fitScale, sliderToZoom, zoomToSlider } from '../model/timelineView';
@@ -374,8 +376,18 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
         ...(t.intensity !== undefined && t.presetId === presetId && { intensity: t.intensity }),
       };
     }
-    const { feel, duration } = TRANSITION_DEFAULTS;
-    return { cutKey: cut.key, presetId, duration: clampDuration(duration, l).duration, feel };
+    // A new transition may trim the clips to make room: preview the timeline as it would be.
+    const r = applyTransition(doc, cut.key, presetId, TRANSITION_DEFAULTS);
+    if (!r.ok) return null;
+    const { feel, duration } = r.transition;
+    return { cutKey: cut.key, presetId, duration, feel, ...(r.trimmed !== NO_ROOM && { doc: r.doc }) };
+  };
+
+  /** What applying a preset at `cut` would trim to make room (nothing when replacing). */
+  const roomAt = (cut: Cut): Room => {
+    if (transitionAt(doc, cut.key)) return NO_ROOM;
+    const l = getLimits(doc, cut);
+    return l.canTransition ? roomFor(cut, clampDuration(TRANSITION_DEFAULTS.duration, l).duration) : NO_ROOM;
   };
 
   const onPreview = (id: string) => {
@@ -432,9 +444,10 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     requestFocus({ kind: 'edit' });
     const cut = cutByKey(r.doc, target.key)!;
     const capped = r.clamped === 'max' ? ` ${describeLimit(cut, getLimits(r.doc, cut))}.` : '';
+    const trimmed = r.trimmed !== NO_ROOM ? ` ${describeTrim(cut, r.trimmed)}` : '';
     if (r.doc === doc) announce(`${preset.name} selected`);
     else if (r.replaced) announce(`Changed to ${preset.name}: ${formatDuration(r.transition.duration)}, Feel kept.${capped}`);
-    else announce(`${preset.name} applied: ${formatDuration(r.transition.duration)}, centred on the cut.${capped}`);
+    else announce(`${preset.name} applied: ${formatDuration(r.transition.duration)}, centred on the cut.${trimmed}${capped}`);
   };
 
   const removeTransitionAt = (cutKey: string) => {
@@ -483,6 +496,8 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const onStepDuration = (cutKey: string, requested: Frames) => {
     const r = setDuration(doc, cutKey, requested);
     if (r.doc !== doc) commitDoc(r.doc, 'Change duration');
+    const cut = r.trimmed !== NO_ROOM ? cutByKey(r.doc, cutKey) : null;
+    if (cut) announce(describeTrim(cut, r.trimmed));
     return r;
   };
 
@@ -494,7 +509,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     const source = sources.find((s) => s.id === sourceId);
     if (!source) return;
     controller.endPreview();
-    const r = insertClipRange(doc, source, index, markedRange(source.frames, marks[source.id], LIBRARY_INSERT));
+    const r = insertClipRange(doc, source, index, markedRange(source.frames, marks[source.id]));
     commitDoc(r.doc, `Add ${source.label}`);
     setSelection({ kind: 'clip', id: r.clip.id });
     setTargetCutKey(null);
@@ -667,7 +682,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const insertCheck = useMemo(
     () =>
       insertSourceClip
-        ? insertAtFrame(doc, insertSourceClip, playhead, markedRange(insertSourceClip.frames, marks[insertSourceClip.id], LIBRARY_INSERT))
+        ? insertAtFrame(doc, insertSourceClip, playhead, markedRange(insertSourceClip.frames, marks[insertSourceClip.id]))
         : null,
     [doc, insertSourceClip, playhead, marks],
   );
@@ -821,11 +836,20 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const dragCut = presetDrag ? cutByKey(doc, presetDrag.cutKey) : null;
   const dragLimits = dragCut ? getLimits(doc, dragCut) : null;
   const dragValid = !!dragLimits?.canTransition;
+  const dragRoom = dragCut && dragValid ? roomAt(dragCut) : NO_ROOM;
   const dragNote = !dragCut
     ? 'Drop on a cut'
     : !dragValid
-      ? `No handles at Cut ${dragCut.index + 1}`
-      : `${transitionAt(doc, dragCut.key) ? 'Replace at' : 'Apply to'} Cut ${dragCut.index + 1}`;
+      ? `Clips too short at Cut ${dragCut.index + 1}`
+      : `${transitionAt(doc, dragCut.key) ? 'Replace at' : 'Apply to'} Cut ${dragCut.index + 1}` +
+        (dragRoom !== NO_ROOM ? ` · trims ${describeRoom(dragCut, dragRoom)}` : '');
+  // Frames that applying a preset would trim off the clips, shaded on the timeline.
+  const trimPreview =
+    dragCut && dragRoom !== NO_ROOM
+      ? { cutKey: dragCut.key, room: dragRoom }
+      : !presetDrag && pendingCandidate?.doc && targetCut
+        ? { cutKey: targetCut.key, room: roomAt(targetCut) }
+        : null;
 
   const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -1036,6 +1060,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
         dropIndex={libDrag?.index ?? null}
         dropCutKey={dragCut?.key ?? null}
         dropCutValid={dragValid}
+        trimPreview={trimPreview}
         cutEls={cutEls}
         transitionEls={transitionEls}
         apiRef={timelineApi}

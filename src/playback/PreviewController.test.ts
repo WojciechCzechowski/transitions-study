@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FrameStore, type Closable } from '../media/FrameStore';
-import { shortB } from '../model/fixtures';
+import { cutAt, noHandleB, shortB } from '../model/fixtures';
+import { applyTransition } from '../model/ops';
 import type { Renderer } from '../render/Renderer';
 import { PreviewController } from './PreviewController';
 
@@ -22,11 +23,12 @@ function setup() {
   const store = new FrameStore<Bitmap>();
   for (const id of ['a', 'b']) for (let f = 0; f < 120; f++) store.put(id, f, new Bitmap(`${id}:${f}`), 1, 1);
   const drawn: string[] = [];
+  const mixes: string[] = [];
   const renderer = {
     isLost: false,
     clear: () => {},
     drawSingle: (b: Bitmap) => drawn.push(b.name),
-    drawTransition: () => {},
+    drawTransition: (p: { from: Bitmap; to: Bitmap }) => mixes.push(`${p.from.name}>${p.to.name}`),
   } as unknown as Renderer;
 
   const c = new PreviewController(store as unknown as FrameStore, () => now);
@@ -43,7 +45,7 @@ function setup() {
     queued = [];
     for (const cb of run) cb(now);
   };
-  return { c, drawn, playing, advance };
+  return { c, drawn, mixes, playing, advance };
 }
 
 const FRAME_MS = 1000 / 30;
@@ -123,5 +125,28 @@ describe('PreviewController source preview', () => {
     expect(c.isPlaying).toBe(false);
     c.setPlayhead(30);
     expect(c.getSourceState()).toBeNull();
+  });
+});
+
+describe('PreviewController transition preview', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('shows the trimmed timeline when the candidate makes room for its transition', () => {
+    const { c, mixes } = setup();
+    const doc = noHandleB(); // B has no head handle
+    c.setDoc(doc);
+    const cut = cutAt(doc);
+    const r = applyTransition(doc, cut.key, 'push', { feel: 50, duration: 24 });
+    if (!r.ok) throw new Error();
+    expect(r.trimmed).toEqual({ a: 0, b: 12 });
+
+    // Reduced motion: holds on the moment of the cut, the transition's midpoint.
+    c.preview({ cutKey: cut.key, presetId: 'push', duration: 24, feel: 50, doc: r.doc }, { autoplay: false, once: true });
+    // A: source frame 15 + 60; B: the 12 frames trimmed off its start are now the head handle.
+    expect(mixes.at(-1)).toBe('a:75>b:12');
+
+    c.endPreview();
+    expect(mixes).toHaveLength(1);
   });
 });

@@ -9,14 +9,18 @@ import {
   cutByKey,
   cutKeyOf,
   getLimits,
+  NO_ROOM,
   normalize,
+  roomFor,
   timelineLength,
   transitionAt,
   visibleLength,
   type ClampResult,
   type Clip,
+  type Cut,
   type Doc,
   type Limits,
+  type Room,
   type Source,
   type Transition,
 } from './timeline';
@@ -33,13 +37,15 @@ export type ApplyResult =
       readonly replaced: boolean;
       readonly clamped: ClampResult['clamped'];
       readonly transition: Transition;
+      /** Frames trimmed off the clips to make room (NO_ROOM when the handles were enough). */
+      readonly trimmed: Room;
     }
   | { readonly ok: false; readonly error: 'no-handles' | 'no-cut'; readonly limits: Limits | null };
 
 export interface ApplyOptions {
   /** Feel for a new transition. Ignored when replacing (the existing feel is kept). */
   readonly feel: number;
-  /** Duration for a new transition, clamped to the handles. Ignored when replacing. */
+  /** Duration for a new transition, clamped to what the clips can give. Ignored when replacing. */
   readonly duration: Frames;
 }
 
@@ -64,11 +70,29 @@ function tuned(t: Transition, easing: Bezier | undefined, intensity: number | un
 }
 
 /**
+ * Make room for a centred transition of `duration` at `cut`: trim the outgoing
+ * clip's end and the incoming clip's start by whatever their handles lack, so
+ * those frames become handle. Later clips shift left. `duration` must be
+ * within the cut's limits.
+ */
+function fitAtCut(doc: Doc, cut: Cut, duration: Frames): { doc: Doc; trimmed: Room } {
+  const trimmed = roomFor(cut, duration);
+  if (trimmed === NO_ROOM) return { doc, trimmed };
+  const clips = doc.clips.map((c) => {
+    if (c.id === cut.from.id) return { ...c, sourceOut: c.sourceOut - trimmed.a };
+    if (c.id === cut.to.id) return { ...c, sourceIn: c.sourceIn + trimmed.b };
+    return c;
+  });
+  return { doc: { ...doc, clips }, trimmed };
+}
+
+/**
  * Apply a preset as a centred transition on one cut.
- * - No transition there yet: create one at the given duration, clamped to the handles.
+ * - No transition there yet: create one at the given duration, clamped to what
+ *   the clips can give, trimming them where their handles are short.
  * - A transition exists: swap the preset, keeping duration, feel and a Fine-tuned curve.
  *   A Fine-tuned intensity is dropped, since intensity means something else per preset.
- * - Not enough handle on either side: refuse with the limits so the UI can explain.
+ * - A clip too short to give even the minimum: refuse with the limits so the UI can explain.
  */
 export function applyTransition(
   doc: Doc,
@@ -85,7 +109,7 @@ export function applyTransition(
   if (existing) {
     const { duration, clamped } = clampDuration(existing.duration, limits);
     if (existing.presetId === presetId && duration === existing.duration) {
-      return { ok: true, doc, replaced: false, clamped: null, transition: existing };
+      return { ok: true, doc, replaced: false, clamped: null, transition: existing, trimmed: NO_ROOM };
     }
     const next = { ...tuned(existing, existing.easing, undefined), presetId, duration };
     return {
@@ -94,10 +118,12 @@ export function applyTransition(
       replaced: true,
       clamped,
       transition: next,
+      trimmed: NO_ROOM,
     };
   }
 
   const { duration, clamped } = clampDuration(options.duration, limits);
+  const room = fitAtCut(doc, cut, duration);
   const transition: Transition = {
     id: `t${doc.nextId}`,
     fromId: cut.from.id,
@@ -106,12 +132,14 @@ export function applyTransition(
     duration,
     feel: normalizeFeel(options.feel),
   };
+  const base = room.doc;
   return {
     ok: true,
-    doc: { ...doc, transitions: [...doc.transitions, transition], nextId: doc.nextId + 1 },
+    doc: normalize({ ...base, transitions: [...base.transitions, transition], nextId: base.nextId + 1 }),
     replaced: false,
     clamped,
     transition,
+    trimmed: room.trimmed,
   };
 }
 
@@ -123,16 +151,24 @@ export function removeTransition(doc: Doc, cutKey: string): Doc {
 export interface EditResult {
   readonly doc: Doc;
   readonly clamped: ClampResult['clamped'];
+  /** Frames trimmed off the clips to make room for a longer transition. */
+  readonly trimmed: Room;
 }
 
-/** Set the duration (symmetric around the cut), clamped to the handles. */
+/**
+ * Set the duration (symmetric around the cut), clamped to what the clips can
+ * give. Growing past the handles trims the clips to make room; shrinking
+ * leaves the clips as they are, so the frames stay as handle.
+ */
 export function setDuration(doc: Doc, cutKey: string, requested: number): EditResult {
   const t = transitionAt(doc, cutKey);
   const cut = cutByKey(doc, cutKey);
-  if (!t || !cut) return { doc, clamped: null };
+  if (!t || !cut) return { doc, clamped: null, trimmed: NO_ROOM };
   const { duration, clamped } = clampDuration(requested, getLimits(doc, cut));
-  if (duration === t.duration) return { doc, clamped };
-  return { doc: replaceTransition(doc, t, { ...t, duration }), clamped };
+  if (duration === t.duration) return { doc, clamped, trimmed: NO_ROOM };
+  const room = fitAtCut(doc, cut, duration);
+  const next = transitionAt(room.doc, cutKey)!;
+  return { doc: normalize(replaceTransition(room.doc, next, { ...next, duration })), clamped, trimmed: room.trimmed };
 }
 
 /** Feel sets easing and intensity together, replacing any Fine-tune overrides. Duration is untouched. */
@@ -169,17 +205,12 @@ export function resetTuning(doc: Doc, cutKey: string): Doc {
 // ---------------------------------------------------------------------------
 // Clips (magnetic: no gaps, later clips shift)
 
-export interface InsertHandles {
-  readonly head: Frames;
-  readonly tail: Frames;
-}
-
-/** Visible range for a freshly inserted source: leave handles so its cuts can take transitions. */
-export function insertRange(frames: Frames, handles: InsertHandles): { sourceIn: Frames; sourceOut: Frames } {
-  const room = Math.max(0, frames - 1);
-  const head = Math.max(0, Math.min(handles.head, Math.floor(room / 2)));
-  const tail = Math.max(0, Math.min(handles.tail, room - head));
-  return { sourceIn: head, sourceOut: frames - tail };
+/**
+ * Visible range for a freshly inserted source: all of it. Its cuts still take
+ * transitions; applying one trims the clip to make the handles it needs.
+ */
+export function insertRange(frames: Frames): SourceRange {
+  return { sourceIn: 0, sourceOut: Math.max(1, frames) };
 }
 
 export interface SourceRange {
@@ -188,9 +219,9 @@ export interface SourceRange {
   readonly sourceOut: Frames;
 }
 
-/** Insert a new instance of `source` at clip boundary `index` (0 … clips.length), with default handles. */
-export function insertClip(doc: Doc, source: Source, index: number, handles: InsertHandles): { doc: Doc; clip: Clip } {
-  return insertClipRange(doc, source, index, insertRange(source.frames, handles));
+/** Insert all of `source` at clip boundary `index` (0 … clips.length). */
+export function insertClip(doc: Doc, source: Source, index: number): { doc: Doc; clip: Clip } {
+  return insertClipRange(doc, source, index, insertRange(source.frames));
 }
 
 /** Insert the `range` part of `source` at clip boundary `index` (0 … clips.length). */

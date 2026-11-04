@@ -40,7 +40,7 @@ Build where the clips are, then upload the build: `npm run build` copies `public
 | Area | File |
 | --- | --- |
 | Preset values, Feel endpoints, preview loop padding | `src/config/transitions.config.ts` |
-| Starting timeline, Library insert handles, decoded-frame cache | `src/config/study.config.ts` |
+| Starting timeline, decoded-frame cache | `src/config/study.config.ts` |
 | Timeline model (clips, cuts, per-cut limits, frame mapping) | `src/model/timeline.ts` |
 | Insert / move / delete / split / trim, and per-cut transition ops | `src/model/ops.ts`, `src/model/feel.ts` |
 | Undo history with gestures | `src/model/history.ts` |
@@ -55,7 +55,7 @@ Build where the clips are, then upload the build: `npm run build` copies `public
 | Sidebar: Library tab, Transitions tab (level 1 picker, level 2 editor) | `src/ui/LibraryPanel.tsx`, `src/ui/TransitionsPanel.tsx`, `src/ui/Gallery.tsx`, `src/ui/Inspector.tsx` |
 | Timeline: clips with trim grips, cuts, transitions | `src/ui/Timeline.tsx`, `src/ui/ClipItem.tsx`, `src/ui/CutZone.tsx`, `src/ui/TransitionItem.tsx` |
 
-All model times are integer frames at 30 fps. Transitions are centred on a cut and always an even number of frames long. A clip's length is shared by the transitions at both of its ends, and trimming into a transition's handle shrinks it down to 2 frames, where the trim stops.
+All model times are integer frames at 30 fps. Library clips go onto the timeline in full (or their marked part). Transitions are centred on a cut and always an even number of frames long, so each half needs that many frames of handle past the cut. Where a clip's handle is short, applying or lengthening a transition trims that clip just enough to make one: the frames it gives up show inside the transition, and later clips shift left (one undo step). Shortening or removing the transition leaves the clips as they are. A clip's length is shared by the transitions at both of its ends, and trimming into a transition's handle shrinks it down to 2 frames, where the trim stops.
 
 ```bash
 npm run typecheck
