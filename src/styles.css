@@ -1396,6 +1396,25 @@ h2[tabindex='-1']:focus-visible {
   z-index: 3;
 }
 
+/* Placeholder for a transition about to be added with + at a cut. */
+.transition-slot {
+  position: absolute;
+  top: 34px;
+  height: 44px;
+  z-index: 3;
+  border: 1px dashed var(--muted);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 0.45);
+  pointer-events: none;
+  animation: slot-in 140ms ease-out;
+}
+
+@keyframes slot-in {
+  from {
+    opacity: 0;
+  }
+}
+
 .transition-body {
   position: absolute;
   inset: 0;

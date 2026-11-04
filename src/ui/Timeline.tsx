@@ -39,6 +39,8 @@ interface Props {
   ppf: number;
   selection: Selection;
   targetCutKey: string | null;
+  /** A cut picked with + that has no transition yet, and the duration one would get there. */
+  pendingSlot: { readonly cutKey: string; readonly duration: Frames } | null;
   /** The Transitions picker is in use: show the target cut's handles. */
   pickerActive: boolean;
   pickerId: string;
@@ -411,20 +413,29 @@ export function Timeline(props: Props) {
                       announce={props.announce}
                     />
                   ) : (
-                    <CutZone
-                      cut={cut}
-                      left={x(cut.frame)}
-                      ready={ready}
-                      engaged={(pickerActive && targetCutKey === cut.key) || (dropHere && props.dropCutValid)}
-                      pickerId={props.pickerId}
-                      buttonRef={(el) => {
-                        if (el) props.cutEls.set(cut.key, el);
-                        else props.cutEls.delete(cut.key);
-                      }}
-                      onHover={(on) => setHoverCut((k) => (on ? cut.key : k === cut.key ? null : k))}
-                      onFocusChange={(on) => setFocusCut((k) => (on ? cut.key : k === cut.key ? null : k))}
-                      onChoose={() => props.onChooseAtCut(cut.key)}
-                    />
+                    <>
+                      {props.pendingSlot?.cutKey === cut.key && (
+                        <div
+                          className="transition-slot"
+                          style={{ left: x(cut.frame - props.pendingSlot.duration / 2), width: x(props.pendingSlot.duration) }}
+                          aria-hidden="true"
+                        />
+                      )}
+                      <CutZone
+                        cut={cut}
+                        left={x(cut.frame)}
+                        ready={ready}
+                        engaged={(pickerActive && targetCutKey === cut.key) || (dropHere && props.dropCutValid)}
+                        pickerId={props.pickerId}
+                        buttonRef={(el) => {
+                          if (el) props.cutEls.set(cut.key, el);
+                          else props.cutEls.delete(cut.key);
+                        }}
+                        onHover={(on) => setHoverCut((k) => (on ? cut.key : k === cut.key ? null : k))}
+                        onFocusChange={(on) => setFocusCut((k) => (on ? cut.key : k === cut.key ? null : k))}
+                        onChoose={() => props.onChooseAtCut(cut.key)}
+                      />
+                    </>
                   )}
                 </div>
               );
