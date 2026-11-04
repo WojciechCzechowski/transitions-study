@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties, type Ref } from 'react';
 import { createPortal } from 'react-dom';
-import { Repeat, RepeatOff, SlidersHorizontal, Trash } from 'lucide-react';
+import { Play, SlidersHorizontal, Square, Trash } from 'lucide-react';
 import { EASING_CURVES, getPreset } from '../config/transitions.config';
 import type { Bezier } from '../model/easing';
 import { INTENSITY_MAX, INTENSITY_MIN, isTuned, tuningParams } from '../model/feel';
@@ -150,6 +150,17 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
 
       <div className="tpopover-actions">
         <div className="tpopover-actions-start">
+          {/* Play first: watching the transition is the main action; Fine-tune is optional. */}
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={on.onToggleLoop}
+            aria-label={looping ? 'Stop preview' : 'Play preview'}
+            data-tip={looping ? 'Stop preview' : 'Play preview'}
+            data-keys={looping ? 'Esc' : undefined}
+          >
+            {looping ? <Square size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
+          </button>
           <button
             ref={tuneBtnRef}
             type="button"
@@ -213,17 +224,6 @@ export function TransitionPopover({ transition: t, anchor, looping, headingRef, 
               />
             </div>
           )}
-          <button
-            type="button"
-            className="btn-icon"
-            aria-pressed={looping}
-            onClick={on.onToggleLoop}
-            aria-label="Preview loop"
-            data-tip={looping ? 'Stop preview loop' : 'Preview loop'}
-            data-keys={looping ? 'Esc' : undefined}
-          >
-            {looping ? <RepeatOff size={16} aria-hidden="true" /> : <Repeat size={16} aria-hidden="true" />}
-          </button>
         </div>
         <button
           type="button"

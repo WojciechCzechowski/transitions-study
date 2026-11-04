@@ -91,6 +91,16 @@ interface PresetDrag {
 }
 
 const TAB_KEY = 'transition-study.tab';
+const HOVER_PREVIEW_KEY = 'transition-study.preview-on-hover';
+
+/** On unless the viewer turned it off. */
+function readPreviewOnHover(): boolean {
+  try {
+    return localStorage.getItem(HOVER_PREVIEW_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
 
 function readTab(): Tab {
   try {
@@ -129,6 +139,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
   const [tab, setTabState] = useState<Tab>(readTab);
   const [pickerActive, setPickerActive] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewOnHover, setPreviewOnHoverState] = useState(readPreviewOnHover);
   const [preview, setPreview] = useState({ active: false, playing: false });
   const [looping, setLooping] = useState(false);
   /** The popover's Fine-tune section; stays open across selections. */
@@ -345,10 +356,25 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
   };
 
   const onPreview = (id: string) => {
+    if (!previewOnHover) return;
     const c = targetCut ? candidateAt(targetCut, id) : null;
     if (!c) return;
     setPreviewId(id);
     controller.preview(c, { autoplay: !reducedMotion, once: false });
+  };
+
+  const setPreviewOnHover = (on: boolean) => {
+    setPreviewOnHoverState(on);
+    try {
+      localStorage.setItem(HOVER_PREVIEW_KEY, on ? 'on' : 'off');
+    } catch {
+      // Not persisted; fine.
+    }
+    // Turning it off stops a gallery preview that's running now.
+    if (!on && previewId && !presetDragRef.current) {
+      controller.endPreview();
+      setPreviewId(null);
+    }
   };
 
   const onLeavePreview = () => {
@@ -749,7 +775,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
           />
         ) : (
           <TransitionsPanel
-            presetName={targetTransition ? getPreset(targetTransition.presetId).name : null}
+            canDragPresets={canDragPresets}
             cutLabel={cutLabel}
           >
             <Gallery
@@ -766,14 +792,12 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
                 onDragEnd={onPresetDragEnd}
                 listRef={pickerListRef}
                 listId={pickerId}
-                reducedMotion={reducedMotion}
-                previewActive={preview.active}
-                previewPlaying={preview.playing}
+                previewOnHover={previewOnHover}
+                onPreviewOnHoverChange={setPreviewOnHover}
                 onPreview={onPreview}
                 onLeave={onLeavePreview}
                 onApply={onApply}
                 onEscape={leavePicker}
-                onTogglePreview={() => controller.togglePreviewPlayback()}
                 onActiveChange={setPickerActive}
               />
           </TransitionsPanel>
@@ -843,7 +867,7 @@ export function Editor({ baseDoc, sources, store, controller, ready, reducedMoti
         <div className="bar-right">
           {reducedMotion && (
             <>
-              <span className="badge">Reduced motion: previews play on request</span>
+              <span className="badge">Reduced motion: previews show a still frame</span>
               <span className="bar-divider" aria-hidden="true" />
             </>
           )}

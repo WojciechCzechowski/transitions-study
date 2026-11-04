@@ -286,7 +286,7 @@ h2[tabindex='-1']:focus-visible {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
@@ -662,14 +662,70 @@ h2[tabindex='-1']:focus-visible {
 }
 
 .tpanel-title {
+  flex: none;
   font-size: 15px;
   font-weight: 500;
 }
 
-.tpanel-sub {
-  padding: 10px 16px 0;
-  font-size: 12px;
+/* --- Transitions help popover ------------------------------------------------ */
+
+.help {
+  position: relative;
+  margin-right: -6px;
+}
+
+.help-button {
   color: var(--muted);
+}
+
+.help-button.open {
+  color: var(--text);
+  background: var(--subtle);
+}
+
+.help-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 288px;
+  padding: 14px 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: ui-tooltip-in 90ms ease-out;
+}
+
+.help-pop:focus {
+  outline: none;
+}
+
+.help-pop-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.help-pop-note {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.help-pop-group {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.help-pop .shortcut-row {
+  align-items: center;
+  padding: 7px 0;
 }
 
 .tpanel-body {
@@ -685,6 +741,7 @@ h2[tabindex='-1']:focus-visible {
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 12px;
+  line-height: 18px;
 }
 
 .notice.info {
@@ -700,11 +757,58 @@ h2[tabindex='-1']:focus-visible {
   gap: 12px;
 }
 
+/* Same height as a one-line .notice (8 + 18 + 8), so swapping them doesn't move the presets. */
 .gallery-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 26px;
+  min-height: 34px;
+}
+
+/* --- switch (Preview on hover) ------------------------------------------- */
+
+.switch {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.switch-track {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 120ms ease-out;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  transition: transform 120ms ease-out;
+}
+
+.switch[aria-checked='true'] .switch-track {
+  background: var(--primary);
+}
+
+.switch[aria-checked='true'] .switch-knob {
+  transform: translateX(12px);
 }
 
 .gallery-status {
@@ -886,10 +990,21 @@ h2[tabindex='-1']:focus-visible {
   background: rgb(0 0 0 / 0.6);
 }
 
+/* Title and the cut it acts on, on one line; the cut is dimmed and truncates. */
+.tpanel-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .tpanel-cut {
-  padding: 10px 16px 0;
-  font-size: 12px;
-  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--faint);
 }
 
 /* --- transition popover --------------------------------------------------- */
@@ -901,7 +1016,7 @@ h2[tabindex='-1']:focus-visible {
   width: 260px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -928,6 +1043,8 @@ h2[tabindex='-1']:focus-visible {
   font-size: 13px;
   font-weight: 500;
   outline: none;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border);
 }
 
 /*

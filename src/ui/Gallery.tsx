@@ -4,6 +4,20 @@ import { nextGalleryIndex } from '../model/galleryNav';
 import { lastInputWasKeyboard } from './hooks';
 import { PresetIcon } from './PresetIcon';
 
+/** The gallery's keyboard controls, shown in the Transitions help popover. */
+export const GALLERY_KEYS: readonly { action: string; keys: readonly string[] }[] = [
+  { action: 'Move and preview', keys: ['←', '→', '↑', '↓'] },
+  { action: 'Apply to the cut', keys: ['Enter'] },
+  { action: 'Back', keys: ['Esc'] },
+];
+
+/** The same help as one sentence, for the listbox description. */
+const helpText = (draggable: boolean) =>
+  [
+    ...(draggable ? ['Drag a preset onto any cut'] : []),
+    ...GALLERY_KEYS.map((k) => `${k.keys.join(' ')} ${k.action.toLowerCase()}`),
+  ].join(' · ');
+
 interface Props {
   presets: readonly PresetConfig[];
   appliedId: string | null;
@@ -24,29 +38,27 @@ interface Props {
   listRef: Ref<HTMLDivElement>;
   /** Id for the listbox, so the cut handle can point at it. */
   listId: string;
-  reducedMotion: boolean;
-  previewActive: boolean;
-  previewPlaying: boolean;
+  /** Hovering (or keyboard-focusing) a preset previews it at the cut. A stored preference. */
+  previewOnHover: boolean;
+  onPreviewOnHoverChange: (on: boolean) => void;
   onPreview: (id: string) => void;
   onLeave: () => void;
   onApply: (id: string) => void;
   onEscape: () => void;
-  onTogglePreview: () => void;
   /** Pointer over the picker or focus inside it. */
   onActiveChange: (active: boolean) => void;
 }
 
 /**
  * Level-1 preset picker in the sidebar. Roving focus: one tab stop, arrow keys
- * move and preview, Enter applies, Esc goes back, Space plays/pauses the
- * preview. Previews revert only when the pointer leaves the whole picker or
- * focus moves outside it, so moving between tiles never flashes the timeline.
+ * move (and preview, when Preview on hover is on), Enter applies, Esc goes back.
+ * Previews revert only when the pointer leaves the whole picker or focus moves
+ * outside it, so moving between tiles never flashes the timeline.
  */
 const DRAG_THRESHOLD_PX = 4;
 
 export function Gallery(props: Props) {
-  const { presets, appliedId, previewId, disabledReason, noticeTone, draggable, draggingId, reducedMotion, previewActive, previewPlaying } =
-    props;
+  const { presets, appliedId, previewId, disabledReason, noticeTone, draggable, draggingId, previewOnHover } = props;
   const press = useRef<{ pointerId: number; id: string; x: number; y: number; dragging: boolean } | null>(null);
   /** The last press turned into a drag, so the click that follows it isn't an apply. */
   const dragged = useRef(false);
@@ -93,6 +105,10 @@ export function Gallery(props: Props) {
       e.preventDefault();
       e.stopPropagation();
       props.onApply(presets[focusIndex]!.id);
+    } else if (e.key === ' ') {
+      // No play/pause in the gallery: keep Space from reaching the editor's play shortcut.
+      e.preventDefault();
+      e.stopPropagation();
     }
   };
 
@@ -130,10 +146,6 @@ export function Gallery(props: Props) {
       e.preventDefault();
       e.stopPropagation();
       props.onEscape();
-    } else if (e.key === ' ' && !e.repeat) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!disabled) props.onTogglePreview();
     }
   };
 
@@ -143,8 +155,13 @@ export function Gallery(props: Props) {
     props.onLeave();
   };
 
-  const previewName = presets.find((p) => p.id === previewId)?.name;
-  const playLabel = previewPlaying ? 'Pause preview' : 'Play preview';
+  const appliedName = presets.find((p) => p.id === appliedId)?.name;
+  // A stable label: it changes only with the cut's state, not while presets are hovered.
+  const status = appliedName
+    ? `Pick a preset to replace ${appliedName}`
+    : previewOnHover
+      ? 'Hover a preset to preview it'
+      : 'Click a preset to apply it';
 
   return (
     <div
@@ -167,18 +184,25 @@ export function Gallery(props: Props) {
         </p>
       ) : (
         <div className="gallery-head">
-          <span className="gallery-status" aria-live="polite">
-            {previewName ? `Previewing ${previewName}` : reducedMotion ? 'Focus a preset to see it at the cut' : 'Hover a preset to preview it'}
+          <span className="gallery-status">
+            {status}
           </span>
           <span className="spacer" />
           <button
             type="button"
-            className="btn btn-small"
-            onClick={props.onTogglePreview}
-            disabled={!previewActive}
-            aria-keyshortcuts="Space"
+            role="switch"
+            aria-checked={previewOnHover}
+            className="switch"
+            onClick={() => props.onPreviewOnHoverChange(!previewOnHover)}
+            onKeyDown={(e) => {
+              // Space toggles the switch itself, not playback.
+              if (e.key === ' ') e.stopPropagation();
+            }}
           >
-            {playLabel}
+            <span className="switch-label">Preview on hover</span>
+            <span className="switch-track" aria-hidden="true">
+              <span className="switch-knob" />
+            </span>
           </button>
         </div>
       )}
@@ -228,8 +252,9 @@ export function Gallery(props: Props) {
           </div>
         ))}
       </div>
-      <p className="gallery-keys muted" id={hintId}>
-        {draggable ? 'Drag a preset onto any cut · ' : ''}Arrows move and preview · Enter apply · Space play/pause · Esc back
+      {/* Shown visually in the Transitions help popover; kept here for the listbox description. */}
+      <p className="sr-only" id={hintId}>
+        {helpText(draggable)}
       </p>
     </div>
   );
