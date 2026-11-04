@@ -97,6 +97,8 @@ export class PreviewController {
   private renderer: Renderer | null = null;
   private doc: Doc | null = null;
   private playhead: Frames = 0;
+  /** Timeline frame under the mouse (the hover preview line), shown instead of the playhead while idle. */
+  private hoverFrame: Frames | null = null;
   private ready = false;
   private mode: Mode = { kind: 'idle' };
   private raf = 0;
@@ -172,6 +174,23 @@ export class PreviewController {
     this.leaveSource(false);
     if (this.mode.kind === 'playing') this.mode = { kind: 'playing', startFrame: frame, startTime: this.now() };
     this.draw();
+  }
+
+  /**
+   * Show the timeline frame under the mouse without moving the playhead
+   * (null when the mouse leaves). Only applies while the timeline is shown
+   * and stopped: playback, preset previews and Library clips ignore it.
+   */
+  setHoverFrame(frame: Frames | null) {
+    if (frame === this.hoverFrame) return;
+    this.hoverFrame = frame;
+    if (this.mode.kind === 'idle') this.draw();
+  }
+
+  /** The timeline frame on screen when nothing is playing or previewing. */
+  private idleFrame(doc: Doc): Frames {
+    if (this.mode.kind !== 'idle' || this.hoverFrame === null) return this.playhead;
+    return clamp(this.hoverFrame, 0, Math.max(0, timelineLength(doc) - 1));
   }
 
   get isPlaying() {
@@ -408,8 +427,9 @@ export class PreviewController {
       const c = m.candidate;
       key = `p|${m.frame}|${m.range.start}|${m.range.end}|${c.cutKey}|${c.presetId}|${c.duration}`;
     } else {
-      mode = { kind: m.kind, playhead: this.playhead };
-      key = `${m.kind}|${this.playhead}`;
+      const frame = this.idleFrame(doc);
+      mode = { kind: m.kind, playhead: frame };
+      key = `${m.kind}|${frame}`;
     }
     if (key === this.demandKey && doc === this.demandDoc) return;
     this.demandKey = key;
@@ -523,7 +543,7 @@ export class PreviewController {
       return;
     }
     const isPreview = m.kind === 'preview';
-    const t = isPreview ? m.frame : this.playhead;
+    const t = isPreview ? m.frame : this.idleFrame(doc);
     const override: TransitionOverride | undefined = isPreview
       ? { cutKey: m.candidate.cutKey, look: m.candidate }
       : undefined;

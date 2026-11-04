@@ -150,3 +150,29 @@ describe('PreviewController transition preview', () => {
     expect(mixes).toHaveLength(1);
   });
 });
+
+describe('PreviewController hover preview', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('shows the hovered frame without moving the playhead, and the playhead again once the mouse leaves', () => {
+    const { c, drawn } = setup();
+    c.setPlayhead(10);
+    expect(drawn.at(-1)).toBe('a:25'); // A starts at source frame 15
+
+    c.setHoverFrame(70);
+    expect(drawn.at(-1)).toBe('b:28'); // 10 frames into B, whose head is 18
+
+    c.setHoverFrame(null);
+    expect(drawn.at(-1)).toBe('a:25');
+  });
+
+  it('is ignored while the timeline plays', () => {
+    const { c, drawn } = setup();
+    c.play();
+    const before = drawn.length;
+    c.setHoverFrame(70);
+    expect(drawn.length).toBe(before);
+    expect(drawn.at(-1)).toBe('a:15');
+  });
+});

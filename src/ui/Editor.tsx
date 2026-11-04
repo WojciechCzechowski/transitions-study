@@ -731,6 +731,8 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     return () => window.removeEventListener('pointerdown', onDown, true);
   }, [showingSource, timelineEl, controller]);
 
+  const onHoverFrame = useCallback((frame: Frames | null) => controller.setHoverFrame(frame), [controller]);
+
   const onScrubStart = () => {
     controller.pause();
     controller.endPreview();
@@ -1055,6 +1057,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       <Timeline
         doc={doc}
         playhead={playhead}
+        playing={playing}
         ready={ready}
         ppf={ppf}
         selection={selection}
@@ -1073,6 +1076,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
         onViewportWidth={setViewportWidth}
         onScrubStart={onScrubStart}
         onScrub={setPlayhead}
+        onHoverFrame={onHoverFrame}
         onSelect={select}
         onChooseAtCut={chooseAtCut}
         gesture={gesture}

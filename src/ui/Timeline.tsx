@@ -48,6 +48,8 @@ const PENDING_SLOT_FRAMES: Frames = 6;
 interface Props {
   doc: Doc;
   playhead: Frames;
+  /** The timeline is playing: the hover preview line is off. */
+  playing: boolean;
   ready: boolean;
   /** Pixels per frame from the zoom control (or fit-to-width). */
   ppf: number;
@@ -73,6 +75,8 @@ interface Props {
   onViewportWidth: (width: number) => void;
   onScrubStart: () => void;
   onScrub: (frame: Frames) => void;
+  /** Timeline frame under the mouse, for the hover preview (null when there is none). Doesn't move the playhead. */
+  onHoverFrame: (frame: Frames | null) => void;
   onSelect: (selection: Selection) => void;
   onChooseAtCut: (cutKey: string) => void;
   gesture: Gesture;
@@ -206,6 +210,50 @@ export function Timeline(props: Props) {
     scrollPos.current = el.scrollLeft;
   }, [playhead, ppf]);
 
+  // --- hover preview -----------------------------------------------------------
+  // A second line follows the mouse and the preview shows the frame under it;
+  // the playhead stays put until a click. Updated straight on the DOM, so moving
+  // the mouse doesn't re-render the clips.
+
+  const hoverEl = useRef<HTMLDivElement>(null);
+  const hoverLabel = useRef<HTMLSpanElement>(null);
+  /** Last mouse x over the timeline, or null when it's elsewhere or pressed. */
+  const hoverClientX = useRef<number | null>(null);
+  const gestureActive = frozenPpf !== null || move !== null || trimLive !== null;
+
+  const refreshHover = () => {
+    const cx = hoverClientX.current;
+    let frame: Frames | null = null;
+    if (cx !== null && !props.playing && !gestureActive && ppf > 0) {
+      const f = Math.round(frameAtClientX(cx));
+      if (f >= 0 && f < len) frame = f;
+    }
+    const el = hoverEl.current;
+    if (el) {
+      el.hidden = frame === null;
+      if (frame !== null) {
+        el.style.left = `${x(frame)}px`;
+        el.style.setProperty('--playhead-x', `${x(frame)}px`);
+        if (hoverLabel.current) hoverLabel.current.textContent = formatClock(frame);
+      }
+    }
+    props.onHoverFrame(frame);
+  };
+  // Re-place it after anything that moves the frames under the mouse (zoom, edits, playback).
+  useLayoutEffect(refreshHover);
+  useEffect(() => () => latest.current.onHoverFrame(null), []);
+
+  const onHoverMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') return;
+    // Pressed: a scrub, drag or trim is running; the line comes back on the next plain move.
+    hoverClientX.current = e.buttons === 0 ? e.clientX : null;
+    refreshHover();
+  };
+  const onHoverEnd = () => {
+    hoverClientX.current = null;
+    refreshHover();
+  };
+
   // --- reorder ----------------------------------------------------------------
 
   const onMoveStart = (clipId: string) => {
@@ -332,13 +380,21 @@ export function Timeline(props: Props) {
         className="timeline-scroll"
         onScroll={(e) => {
           scrollPos.current = e.currentTarget.scrollLeft;
+          refreshHover();
         }}
         ref={(el) => {
           scrollEl.current = el;
           scrollRef(el);
         }}
       >
-        <div className="timeline-inner" ref={innerRef} style={{ width: innerWidth }}>
+        <div
+          className="timeline-inner"
+          ref={innerRef}
+          style={{ width: innerWidth }}
+          onPointerMove={onHoverMove}
+          onPointerDown={onHoverEnd}
+          onPointerLeave={onHoverEnd}
+        >
           <div
             className="ruler"
             role="slider"
@@ -517,6 +573,10 @@ export function Timeline(props: Props) {
                 <div className="insert-marker" style={{ left: x(boundaryFrame(doc, markerIndex)) }} aria-hidden="true" />
               )}
             </div>
+          </div>
+
+          <div className="hover-playhead" ref={hoverEl} hidden aria-hidden="true">
+            <span className="playhead-label" ref={hoverLabel} />
           </div>
 
           <div

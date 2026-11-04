@@ -38,6 +38,9 @@
   --strip-a: 199 168 139;
   --strip-b: 142 171 198;
   --playhead: #111111;
+  /* The hover preview line: same width as the playhead, told apart by colour. */
+  --hover-playhead: #f5b800;
+  --on-hover-playhead: #111111;
   --radius: 10px;
   --radius-sm: 8px;
   --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.06), 0 6px 20px rgb(0 0 0 / 0.08);
@@ -2483,6 +2486,26 @@ button.source-pill:hover {
   background: var(--playhead);
   pointer-events: none;
   z-index: 4;
+}
+
+.hover-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--hover-playhead);
+  pointer-events: none;
+  /* Under the playhead, so the real one wins where they meet. */
+  z-index: 4;
+}
+
+.hover-playhead[hidden] {
+  display: none;
+}
+
+.hover-playhead .playhead-label {
+  background: var(--hover-playhead);
+  color: var(--on-hover-playhead);
 }
 
 .playhead-label {
