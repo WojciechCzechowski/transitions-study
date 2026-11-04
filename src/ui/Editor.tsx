@@ -192,6 +192,11 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   const limits = useMemo(() => (targetCut ? getLimits(doc, targetCut) : null), [doc, targetCut]);
   const len = timelineLength(doc);
   const ppf = zoom ?? fitScale(len, viewportWidth);
+  // Fit once, when the timeline is first measured, then keep that scale: inserts,
+  // deletes and pane resizes don't rezoom. Only the zoom controls change it.
+  useEffect(() => {
+    if (zoom === null && viewportWidth > 0) setZoom(fitScale(len, viewportWidth));
+  }, [zoom, viewportWidth, len]);
   const sourceIndex = useMemo(() => new Map(sources.map((s, i) => [s.id, i] as const)), [sources]);
   const sourceTone = useCallback((id: string) => sourceIndex.get(id) ?? 0, [sourceIndex]);
   const sourceLabel = useCallback((id: string) => sources.find((s) => s.id === id)?.label ?? id, [sources]);

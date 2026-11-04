@@ -182,12 +182,28 @@ export function Timeline(props: Props) {
     props.onScrub(clamp(next, 0, Math.max(0, len - 1)));
   };
 
-  // Keep the playhead in view while playing or stepping.
-  useEffect(() => {
+  // Zoom around the playhead: keep it at the same spot in the viewport (or bring it
+  // to a third in, if it was out of view). Otherwise keep it in view while playing
+  // or stepping. A layout effect, so the rescaled track never paints at the old scroll.
+  const prevPpf = useRef(ppf);
+  // Last scroll position at the old scale (the browser may already have clamped
+  // scrollLeft to the narrower track by the time a zoom-out reaches the effect).
+  const scrollPos = useRef(0);
+  useLayoutEffect(() => {
     const el = scrollEl.current;
+    const oldPpf = prevPpf.current;
+    prevPpf.current = ppf;
     if (!el) return;
-    const px = playhead * ppf;
-    if (px < el.scrollLeft || px > el.scrollLeft + el.clientWidth - 24) el.scrollLeft = Math.max(0, px - el.clientWidth / 3);
+    const visible = el.clientWidth - 24;
+    if (oldPpf !== ppf) {
+      const oldOffset = playhead * oldPpf - scrollPos.current;
+      const offset = oldOffset >= 0 && oldOffset <= visible ? oldOffset : el.clientWidth / 3;
+      el.scrollLeft = Math.max(0, playhead * ppf - offset);
+    } else {
+      const px = playhead * ppf;
+      if (px < el.scrollLeft || px > el.scrollLeft + visible) el.scrollLeft = Math.max(0, px - el.clientWidth / 3);
+    }
+    scrollPos.current = el.scrollLeft;
   }, [playhead, ppf]);
 
   // --- reorder ----------------------------------------------------------------
@@ -314,6 +330,9 @@ export function Timeline(props: Props) {
       </div>
       <div
         className="timeline-scroll"
+        onScroll={(e) => {
+          scrollPos.current = e.currentTarget.scrollLeft;
+        }}
         ref={(el) => {
           scrollEl.current = el;
           scrollRef(el);
