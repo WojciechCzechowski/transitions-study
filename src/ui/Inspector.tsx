@@ -3,11 +3,11 @@ import { getPreset } from '../config/transitions.config';
 import { formatBezier, type Bezier } from '../model/easing';
 import { feelToParams } from '../model/feel';
 import { describeFeelClamp } from '../model/messages';
-import type { Doc, Limits, Transition } from '../model/timeline';
+import type { Cut, Limits, Transition } from '../model/timeline';
 import { formatDuration } from '../model/time';
 
 interface Props {
-  doc: Doc;
+  cut: Cut;
   transition: Transition;
   limits: Limits;
   looping: boolean;
@@ -24,13 +24,13 @@ interface Props {
  * Level-2 sidebar view for the selected transition: duration readout, the Feel
  * slider and actions. The preset name is the panel's breadcrumb heading.
  */
-export function Inspector({ doc, transition, limits, looping, changeRef, ...on }: Props) {
+export function Inspector({ cut, transition, limits, looping, changeRef, ...on }: Props) {
   const preset = getPreset(transition.presetId);
   const params = feelToParams(transition.feel, preset.feel, limits);
   const feelId = useId();
   const clampNote =
     params.clamped === 'max' && transition.duration === params.duration
-      ? describeFeelClamp(doc, limits, params.requested)
+      ? describeFeelClamp(cut, limits, params.requested)
       : null;
   const manual = transition.duration !== params.duration;
 

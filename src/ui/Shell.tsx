@@ -40,8 +40,8 @@ function usePaneSizes() {
 interface Props {
   header: ReactNode;
   preview: ReactNode;
-  /** Slot elements the editor portals its sidebar panel and timeline into. */
-  sidebarRef: Ref<HTMLDivElement>;
+  /** Slot elements the editor portals its sidebar (rail + panel) and timeline into. */
+  sidebarRef: Ref<HTMLElement>;
   timelineRef: Ref<HTMLElement>;
 }
 
@@ -67,17 +67,7 @@ export function Shell({ header, preview, sidebarRef, timelineRef }: Props) {
       <header className="topbar">{header}</header>
       <div className="body" ref={bodyRef} style={style}>
         <div className="top">
-          <aside className="sidebar">
-            <div className="rail" aria-hidden="true">
-              <div className="rail-item active">
-                <span className="rail-icon">
-                  <TransitionsGlyph />
-                </span>
-                <span className="rail-label">Transitions</span>
-              </div>
-            </div>
-            <div className="sidebar-panel" ref={sidebarRef} />
-          </aside>
+          <aside className="sidebar" ref={sidebarRef} />
           <Splitter
             orientation="vertical"
             label="Resize sidebar"
@@ -101,15 +91,5 @@ export function Shell({ header, preview, sidebarRef, timelineRef }: Props) {
         <section className="timeline-pane" aria-label="Timeline" ref={timelineRef} />
       </div>
     </div>
-  );
-}
-
-/** Two overlapping frames: the rail's own glyph for the Transitions tab. */
-function TransitionsGlyph() {
-  return (
-    <svg viewBox="0 0 20 20" width="20" height="20" focusable="false">
-      <rect x="2.5" y="4.5" width="9" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="8.5" y="4.5" width="9" height="11" rx="2" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
   );
 }

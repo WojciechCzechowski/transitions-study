@@ -1,112 +1,127 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from 'react';
 import { getPreset } from '../config/transitions.config';
-import { dragDuration, type Edge } from '../model/dragDuration';
-import { describeLimit, describeMinimum } from '../model/messages';
-import { setDuration } from '../model/ops';
+import { trimClip, trimLimitTransition, type TrimEdge, type TrimResult } from '../model/ops';
 import {
-  cutFrame,
+  clipStarts,
+  cuts,
+  getLimits,
   timelineLength,
+  transitionAt,
   visibleLength,
   type ClampResult,
-  type Clip,
   type Doc,
-  type Limits,
 } from '../model/timeline';
-import { clamp, formatDuration, formatTimecode, FPS, type Frames } from '../model/time';
+import { boundaryFrame, insertionIndex, rulerLabel, tickStep } from '../model/timelineView';
+import { clamp, FPS, formatTimecode, type Frames } from '../model/time';
+import { ClipItem, trimLimitText, type TrimFeedback } from './ClipItem';
+import { CutZone } from './CutZone';
 import { useElementWidth } from './hooks';
+import { TransitionItem, type Gesture } from './TransitionItem';
+
+export type Selection = { readonly kind: 'clip' | 'transition'; readonly id: string } | null;
+
+/** Hit-testing for drags that start outside the timeline (Library cards). */
+export interface TimelineApi {
+  /** Insertion index under the pointer, or null when it's not over the timeline. */
+  hit(clientX: number, clientY: number): number | null;
+}
 
 interface Props {
   doc: Doc;
-  limits: Limits;
   playhead: Frames;
   ready: boolean;
-  selected: boolean;
-  /** The level-1 picker is hovered or focused, or a preview is running. */
+  /** Pixels per frame from the zoom control (or fit-to-width). */
+  ppf: number;
+  selection: Selection;
+  targetCutKey: string | null;
+  /** The Transitions picker is in use: show the target cut's handles. */
   pickerActive: boolean;
-  /** Id of the picker list the cut handle moves focus into. */
   pickerId: string;
-  cutHandleRef: Ref<HTMLButtonElement>;
-  transitionRef: Ref<HTMLButtonElement>;
+  /** Insertion marker for a Library drag. */
+  dropIndex: number | null;
+  /** Focus targets the editor moves focus to. */
+  cutEls: Map<string, HTMLButtonElement>;
+  transitionEls: Map<string, HTMLButtonElement>;
+  apiRef: Ref<TimelineApi>;
+  sourceTone: (sourceId: string) => number;
+  onViewportWidth: (width: number) => void;
   onScrubStart: () => void;
   onScrub: (frame: Frames) => void;
-  onSelect: (selected: boolean) => void;
-  onChooseAtCut: () => void;
-  gesture: {
-    begin: () => void;
-    update: (doc: Doc) => void;
-    end: (label: string) => void;
-    cancel: () => void;
-  };
-  /** Discrete duration change (keyboard). Returns how it was clamped. */
-  onStepDuration: (requested: Frames) => { readonly clamped: ClampResult['clamped'] };
+  onSelect: (selection: Selection) => void;
+  onChooseAtCut: (cutKey: string) => void;
+  gesture: Gesture;
+  onStepDuration: (cutKey: string, requested: Frames) => { readonly clamped: ClampResult['clamped'] };
+  onMoveClip: (clipId: string, toIndex: number) => void;
+  onNudgeClip: (clipId: string, delta: -1 | 1) => void;
+  /** Keyboard trim: commit one step. */
+  onTrimStep: (clipId: string, edge: TrimEdge, requested: Frames) => TrimResult;
   announce: (text: string) => void;
 }
 
-interface DragState {
-  edge: Edge;
-  pointerId: number;
-  startX: number;
-  startDuration: Frames;
-  baseDoc: Doc;
-  announcedLimit: boolean;
-}
+/** Space after the last clip, so there's room to drop at the end. */
+const END_ROOM_PX = 160;
 
 export function Timeline(props: Props) {
-  const { doc, limits, playhead, ready, selected, pickerActive } = props;
-  const [innerRef, width] = useElementWidth<HTMLDivElement>();
+  const { doc, playhead, ready, selection, targetCutKey, pickerActive } = props;
+  const [scrollRef, viewportWidth] = useElementWidth<HTMLDivElement>();
+  const innerRef = useRef<HTMLDivElement>(null);
+  const scrollEl = useRef<HTMLDivElement | null>(null);
+
+  // Freeze the scale while a gesture runs, so the length changing under a trim doesn't rescale it.
+  const [frozenPpf, setFrozenPpf] = useState<number | null>(null);
+  const ppf = frozenPpf ?? props.ppf;
+  const freeze = (on: boolean) => setFrozenPpf(on ? ppf : null);
+
   const len = timelineLength(doc);
-  const ppf = width > 0 ? width / len : 0;
-  const cut = cutFrame(doc);
+  const starts = clipStarts(doc);
+  const cutList = cuts(doc);
   const x = (f: number) => f * ppf;
 
-  const [hoverCut, setHoverCut] = useState(false);
-  const [cutFocused, setCutFocused] = useState(false);
-  const [edgeFocused, setEdgeFocused] = useState<Edge | null>(null);
-  const [limitHit, setLimitHit] = useState<ClampResult['clamped']>(null);
-  const [dragEdge, setDragEdge] = useState<Edge | null>(null);
-  const drag = useRef<DragState | null>(null);
+  const [hoverCut, setHoverCut] = useState<string | null>(null);
+  const [focusCut, setFocusCut] = useState<string | null>(null);
+  const [engagedCut, setEngagedCut] = useState<string | null>(null);
+  const [move, setMove] = useState<{ clipId: string; index: number } | null>(null);
+  const [trimLive, setTrimLive] = useState<(TrimFeedback & { clipId: string }) | null>(null);
+  const [trimFocus, setTrimFocus] = useState<{ clipId: string; edge: TrimEdge; reason: string | null } | null>(null);
+  const trimBase = useRef<Doc | null>(null);
   const scrubbing = useRef(false);
   const latest = useRef(props);
   useLayoutEffect(() => {
     latest.current = props;
   });
 
-  const t = doc.transition;
-  const showHandles = hoverCut || cutFocused || pickerActive || dragEdge !== null || edgeFocused !== null;
-
-  // Escape cancels an edge drag and restores the duration from before it.
   useEffect(() => {
-    if (!dragEdge) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key !== 'Escape' || !drag.current) return;
-      e.preventDefault();
-      e.stopPropagation();
-      drag.current = null;
-      setDragEdge(null);
-      setLimitHit(null);
-      latest.current.gesture.cancel();
-      latest.current.announce('Duration change cancelled');
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [dragEdge]);
+    latest.current.onViewportWidth(Math.max(0, viewportWidth - 24));
+  }, [viewportWidth]);
+
+  const frameAtClientX = (clientX: number) => {
+    const rect = innerRef.current?.getBoundingClientRect();
+    return rect ? (clientX - rect.left) / (ppf || 1) : 0;
+  };
+
+  useImperativeHandle(props.apiRef, () => ({
+    hit(clientX, clientY) {
+      const el = scrollEl.current;
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+      return insertionIndex(latest.current.doc, frameAtClientX(clientX));
+    },
+  }));
 
   // --- ruler ------------------------------------------------------------------
 
-  const frameAt = (clientX: number, el: HTMLElement) => {
-    const rect = el.getBoundingClientRect();
-    return clamp(Math.round((clientX - rect.left) / (ppf || 1)), 0, len - 1);
-  };
+  const frameAt = (clientX: number) => clamp(Math.round(frameAtClientX(clientX)), 0, Math.max(0, len - 1));
 
   const onRulerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     scrubbing.current = true;
     props.onScrubStart();
-    props.onScrub(frameAt(e.clientX, e.currentTarget));
+    props.onScrub(frameAt(e.clientX));
   };
   const onRulerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (scrubbing.current) props.onScrub(frameAt(e.clientX, e.currentTarget));
+    if (scrubbing.current) props.onScrub(frameAt(e.clientX));
   };
   const onRulerUp = () => {
     scrubbing.current = false;
@@ -133,70 +148,122 @@ export function Timeline(props: Props) {
     props.onScrub(clamp(next, 0, len - 1));
   };
 
-  // --- edges ------------------------------------------------------------------
+  // Keep the playhead in view while playing or stepping.
+  useEffect(() => {
+    const el = scrollEl.current;
+    if (!el) return;
+    const px = playhead * ppf;
+    if (px < el.scrollLeft || px > el.scrollLeft + el.clientWidth - 24) el.scrollLeft = Math.max(0, px - el.clientWidth / 3);
+  }, [playhead, ppf]);
 
-  const onEdgeDown = (edge: Edge) => (e: PointerEvent<HTMLDivElement>) => {
-    if (!t || e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    e.currentTarget.focus({ preventScroll: true });
-    drag.current = { edge, pointerId: e.pointerId, startX: e.clientX, startDuration: t.duration, baseDoc: doc, announcedLimit: false };
-    setDragEdge(edge);
-    setLimitHit(null);
-    props.onSelect(true);
+  // --- reorder ----------------------------------------------------------------
+
+  const onMoveStart = (clipId: string) => {
+    props.onScrubStart();
+    freeze(true);
+    setMove({ clipId, index: insertionIndex(doc, playhead) });
+    props.onSelect({ kind: 'clip', id: clipId });
+  };
+  const onMove = (clientX: number) => {
+    const index = insertionIndex(latest.current.doc, frameAtClientX(clientX));
+    setMove((m) => (m ? { ...m, index } : m));
+  };
+  const onMoveEnd = (commit: boolean) => {
+    const m = move;
+    setMove(null);
+    freeze(false);
+    if (commit && m) props.onMoveClip(m.clipId, m.index);
+  };
+
+  // --- trim -------------------------------------------------------------------
+
+  const trimReason = (base: Doc, clipId: string, edge: TrimEdge, r: TrimResult) => {
+    const t = r.limit ? trimLimitTransition(base, clipId, edge, r.limit) : null;
+    return trimLimitText(r.limit, t ? getPreset(t.presetId).name : null);
+  };
+
+  const onTrimStart = (clipId: string) => {
+    props.onScrubStart();
+    trimBase.current = doc;
+    freeze(true);
+    props.onSelect({ kind: 'clip', id: clipId });
     props.gesture.begin();
   };
-
-  const onEdgeMove = (e: PointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    if (!d || e.pointerId !== d.pointerId) return;
-    const r = dragDuration(d.startDuration, d.edge, e.clientX - d.startX, ppf, limits);
-    setLimitHit(r.clamped);
-    if (r.clamped === 'max' && !d.announcedLimit) {
-      d.announcedLimit = true;
-      props.announce(describeLimit(doc, limits));
+  const onTrimMove = (clipId: string, edge: TrimEdge, requested: Frames) => {
+    const base = trimBase.current;
+    if (!base) return;
+    const r = trimClip(base, clipId, edge, requested);
+    const clip = r.doc.clips.find((c) => c.id === clipId);
+    setTrimLive({ clipId, edge, length: clip ? visibleLength(clip) : 0, reason: trimReason(base, clipId, edge, r) });
+    props.gesture.update(r.doc);
+  };
+  const onTrimEnd = (commit: boolean) => {
+    const base = trimBase.current;
+    if (!base) return;
+    const clipId = trimLive?.clipId;
+    trimBase.current = null;
+    setTrimLive(null);
+    freeze(false);
+    if (commit) {
+      const label = base.clips.find((c) => c.id === clipId)?.label ?? 'clip';
+      props.gesture.end(`Trim ${label}`);
+    } else {
+      props.gesture.cancel();
     }
-    if (r.clamped !== 'max') d.announcedLimit = false;
-    props.gesture.update(setDuration(d.baseDoc, r.duration).doc);
   };
 
-  const onEdgeUp = (e: PointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    if (!d || e.pointerId !== d.pointerId) return;
-    drag.current = null;
-    setDragEdge(null);
-    setLimitHit(null);
-    props.gesture.end('Change duration');
-  };
+  // Escape cancels a pointer trim or a reorder.
+  const moving = move !== null;
+  const trimming = trimLive !== null;
+  useEffect(() => {
+    if (!trimming && !moving) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (trimBase.current) {
+        trimBase.current = null;
+        setTrimLive(null);
+        setFrozenPpf(null);
+        latest.current.gesture.cancel();
+        latest.current.announce('Trim cancelled');
+      }
+      setMove((m) => {
+        if (m) latest.current.announce('Move cancelled');
+        return null;
+      });
+      setFrozenPpf(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [trimming, moving]);
 
-  const onEdgeKey = (edge: Edge) => (e: KeyboardEvent) => {
-    if (!t) return;
-    const step = e.shiftKey ? 10 : 2;
-    const outward = edge === 'right' ? 'ArrowRight' : 'ArrowLeft';
-    const inward = edge === 'right' ? 'ArrowLeft' : 'ArrowRight';
-    let requested: number | null = null;
-    if (e.key === outward || e.key === 'ArrowUp') requested = t.duration + step;
-    else if (e.key === inward || e.key === 'ArrowDown') requested = t.duration - step;
-    else if (e.key === 'Home') requested = limits.min;
-    else if (e.key === 'End') requested = limits.max;
-    if (requested === null) return;
-    e.preventDefault();
-    const r = props.onStepDuration(requested);
-    setLimitHit(r.clamped);
-    if (r.clamped === 'max') props.announce(describeLimit(doc, limits));
-    else if (r.clamped === 'min') props.announce(describeMinimum(limits));
+  const onTrimStep = (clipId: string, edge: TrimEdge, requested: Frames) => {
+    const r = props.onTrimStep(clipId, edge, requested);
+    const reason = trimReason(doc, clipId, edge, r);
+    setTrimFocus({ clipId, edge, reason });
+    if (reason) props.announce(reason);
   };
 
   // --- render -------------------------------------------------------------------
 
+  const { major, minor } = tickStep(ppf);
+  const innerWidth = Math.max(x(len) + END_ROOM_PX, viewportWidth);
   const ticks: { f: number; major: boolean }[] = [];
-  for (let f = 0; f <= len; f += 5) ticks.push({ f, major: f % FPS === 0 });
+  if (ppf > 0) {
+    const lastFrame = Math.ceil(innerWidth / ppf);
+    for (let f = 0; f <= lastFrame; f += minor) ticks.push({ f, major: f % major === 0 });
+  }
 
-  const aTail = limits.available.aTail;
-  const bHead = limits.available.bHead;
-  const half = t ? t.duration / 2 : 0;
-  const tooltip = t && (dragEdge || edgeFocused) ? tooltipText(doc, limits, t.duration, limitHit) : null;
+  const markerIndex = move ? move.index : props.dropIndex;
+  const trimFeedbackFor = (clipId: string): TrimFeedback | null => {
+    if (trimLive?.clipId === clipId) return trimLive;
+    if (trimFocus?.clipId === clipId) {
+      const clip = doc.clips.find((c) => c.id === clipId);
+      return clip ? { edge: trimFocus.edge, length: visibleLength(clip), reason: trimFocus.reason } : null;
+    }
+    return null;
+  };
 
   return (
     <div className="timeline">
@@ -204,164 +271,149 @@ export function Timeline(props: Props) {
         <div className="track-header-ruler">{formatTimecode(playhead)}</div>
         <div className="track-header">V1</div>
       </div>
-      <div className="timeline-inner" ref={innerRef}>
-        <div
-          className="ruler"
-          role="slider"
-          tabIndex={0}
-          aria-label="Playhead"
-          aria-valuemin={0}
-          aria-valuemax={len - 1}
-          aria-valuenow={playhead}
-          aria-valuetext={`Frame ${playhead}, ${formatTimecode(playhead)}`}
-          onPointerDown={onRulerDown}
-          onPointerMove={onRulerMove}
-          onPointerUp={onRulerUp}
-          onPointerCancel={onRulerUp}
-          onKeyDown={onRulerKey}
-        >
-          {ppf > 0 &&
-            ticks.map(({ f, major }) => (
-              <div key={f} className={`tick${major ? ' major' : ''}`} style={{ left: x(f) }}>
-                {major && <span>{f / FPS}s</span>}
+      <div
+        className="timeline-scroll"
+        ref={(el) => {
+          scrollEl.current = el;
+          scrollRef(el);
+        }}
+      >
+        <div className="timeline-inner" ref={innerRef} style={{ width: innerWidth }}>
+          <div
+            className="ruler"
+            role="slider"
+            tabIndex={0}
+            aria-label="Playhead"
+            aria-valuemin={0}
+            aria-valuemax={len - 1}
+            aria-valuenow={playhead}
+            aria-valuetext={`Frame ${playhead}, ${formatTimecode(playhead)}`}
+            onPointerDown={onRulerDown}
+            onPointerMove={onRulerMove}
+            onPointerUp={onRulerUp}
+            onPointerCancel={onRulerUp}
+            onKeyDown={onRulerKey}
+          >
+            {ticks.map(({ f, major: isMajor }) => (
+              <div key={f} className={`tick${isMajor ? ' major' : ''}`} style={{ left: x(f) }}>
+                {isMajor && <span>{rulerLabel(f)}</span>}
               </div>
             ))}
-        </div>
+          </div>
 
-        <div
-          className="track"
-          role="group"
-          aria-label="Video track V1"
-          onPointerDown={(e) => {
-            const el = e.target as HTMLElement;
-            if (el === e.currentTarget || el.closest('.clip')) props.onSelect(false);
-          }}
-        >
-          {ppf > 0 && (
-            <>
-              <ClipBlock clip={doc.a} left={x(doc.a.start)} width={x(visibleLength(doc.a))} side="a" />
-              <ClipBlock clip={doc.b} left={x(doc.b.start)} width={x(visibleLength(doc.b))} side="b" />
+          <div
+            className="track"
+            role="group"
+            aria-label="Video track V1"
+            onPointerDown={(e) => {
+              if (e.target === e.currentTarget) props.onSelect(null);
+            }}
+          >
+            {doc.clips.map((clip, i) => (
+              <ClipItem
+                key={clip.id}
+                clip={clip}
+                index={i}
+                left={x(starts[i]!)}
+                width={x(visibleLength(clip))}
+                tone={props.sourceTone(clip.sourceId)}
+                selected={selection?.kind === 'clip' && selection.id === clip.id}
+                trim={trimFeedbackFor(clip.id)}
+                ppf={ppf}
+                onSelect={() => props.onSelect({ kind: 'clip', id: clip.id })}
+                onMoveStart={onMoveStart}
+                onMove={onMove}
+                onMoveEnd={onMoveEnd}
+                onNudge={props.onNudgeClip}
+                onTrimStart={onTrimStart}
+                onTrimMove={onTrimMove}
+                onTrimEnd={onTrimEnd}
+                onTrimStep={onTrimStep}
+                onTrimFocus={(clipId, edge) => {
+                  if (!edge) setTrimFocus((f) => (f?.clipId === clipId ? null : f));
+                }}
+              />
+            ))}
 
-              {showHandles && (
-                <>
-                  <div
-                    className={`handle-strip strip-a${aTail === 0 ? ' empty' : ''}`}
-                    style={{ left: x(cut), width: Math.max(2, x(Math.min(aTail, len - cut))) }}
-                  >
-                    <span>{doc.a.label} tail handle · {aTail} f</span>
-                  </div>
-                  <div
-                    className={`handle-strip strip-b${bHead === 0 ? ' empty' : ''}`}
-                    style={{ left: x(cut - Math.min(bHead, cut)), width: Math.max(2, x(Math.min(bHead, cut))) }}
-                  >
-                    <span>{doc.b.label} head handle · {bHead} f</span>
-                  </div>
-                </>
-              )}
-
-              {dragEdge && limits.canTransition && (
-                <div className="max-reach" style={{ left: x(cut - limits.max / 2), width: x(limits.max) }} aria-hidden="true" />
-              )}
-
-              {!t && (
-                <div
-                  className={`cut-zone${pickerActive ? ' engaged' : ''}`}
-                  style={{ left: x(cut) }}
-                  onPointerEnter={() => setHoverCut(true)}
-                  onPointerLeave={() => setHoverCut(false)}
-                >
-                  <button
-                    ref={props.cutHandleRef}
-                    type="button"
-                    className="cut-handle"
-                    aria-label={ready ? 'Choose a transition for the cut' : 'Choose a transition for the cut (preparing frames)'}
-                    aria-controls={props.pickerId}
-                    aria-disabled={!ready || undefined}
-                    onFocus={() => setCutFocused(true)}
-                    onBlur={() => setCutFocused(false)}
-                    onClick={() => ready && props.onChooseAtCut()}
-                  >
-                    <span aria-hidden="true">+</span>
-                  </button>
-                </div>
-              )}
-
-              {t && (
-                <div
-                  className={`transition-object${selected ? ' selected' : ''}${dragEdge ? ' dragging' : ''}${limitHit === 'max' ? ' at-limit' : ''}`}
-                  style={{ left: x(cut - half), width: x(t.duration) }}
-                >
-                  <button
-                    ref={props.transitionRef}
-                    type="button"
-                    className="transition-body"
-                    aria-pressed={selected}
-                    aria-label={`${getPreset(t.presetId).name} transition, ${formatDuration(t.duration)}, centred on the cut. Delete removes it.`}
-                    onFocus={() => props.onSelect(true)}
-                    onClick={() => props.onSelect(true)}
-                  >
-                    <span className="transition-label">
-                      {getPreset(t.presetId).name} · {t.duration} f
-                    </span>
-                  </button>
-                  {(['left', 'right'] as const).map((edge) => (
-                    <div
-                      key={edge}
-                      className={`edge edge-${edge}`}
-                      role="slider"
-                      tabIndex={0}
-                      aria-label={`Transition ${edge === 'left' ? 'start' : 'end'} edge (duration)`}
-                      aria-valuemin={limits.min}
-                      aria-valuemax={limits.max}
-                      aria-valuenow={t.duration}
-                      aria-valuetext={`${t.duration} frames, ${(t.duration / FPS).toFixed(2)} seconds`}
-                      onPointerDown={onEdgeDown(edge)}
-                      onPointerMove={onEdgeMove}
-                      onPointerUp={onEdgeUp}
-                      onPointerCancel={onEdgeUp}
-                      onKeyDown={onEdgeKey(edge)}
-                      onFocus={() => {
-                        setEdgeFocused(edge);
-                        props.onSelect(true);
+            {cutList.map((cut) => {
+              const t = transitionAt(doc, cut.key);
+              const limits = getLimits(doc, cut);
+              const showStrips =
+                hoverCut === cut.key || focusCut === cut.key || engagedCut === cut.key || (pickerActive && targetCutKey === cut.key);
+              const aTail = limits.available.aTail;
+              const bHead = limits.available.bHead;
+              const half = t ? t.duration / 2 : 0;
+              return (
+                <div key={cut.key} className="cut-layer">
+                  {showStrips && (
+                    <>
+                      <div
+                        className={`handle-strip strip-a${aTail === 0 ? ' empty' : ''}`}
+                        style={{ left: x(cut.frame), width: Math.max(2, x(Math.min(aTail, len - cut.frame))) }}
+                      >
+                        <span>
+                          {cut.from.label} tail · {aTail} f
+                        </span>
+                      </div>
+                      <div
+                        className={`handle-strip strip-b${bHead === 0 ? ' empty' : ''}`}
+                        style={{ left: x(cut.frame - Math.min(bHead, cut.frame)), width: Math.max(2, x(Math.min(bHead, cut.frame))) }}
+                      >
+                        <span>
+                          {cut.to.label} head · {bHead} f
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  {t ? (
+                    <TransitionItem
+                      doc={doc}
+                      cut={cut}
+                      transition={t}
+                      limits={limits}
+                      ppf={ppf}
+                      left={x(cut.frame - half)}
+                      width={x(t.duration)}
+                      selected={selection?.kind === 'transition' && selection.id === t.id}
+                      bodyRef={(el) => {
+                        if (el) props.transitionEls.set(t.id, el);
+                        else props.transitionEls.delete(t.id);
                       }}
-                      onBlur={() => {
-                        setEdgeFocused(null);
-                        setLimitHit(null);
-                      }}
+                      gesture={props.gesture}
+                      onSelect={() => props.onSelect({ kind: 'transition', id: t.id })}
+                      onGestureActive={freeze}
+                      onEngaged={(on) => setEngagedCut((k) => (on ? cut.key : k === cut.key ? null : k))}
+                      onStepDuration={(requested) => props.onStepDuration(cut.key, requested)}
+                      announce={props.announce}
                     />
-                  ))}
-                  {tooltip && (
-                    <div className={`tooltip${limitHit ? ' warn' : ''}`} role="status">
-                      <strong>{tooltip.value}</strong>
-                      {tooltip.reason && <span>{tooltip.reason}</span>}
-                    </div>
+                  ) : (
+                    <CutZone
+                      cut={cut}
+                      left={x(cut.frame)}
+                      ready={ready}
+                      engaged={pickerActive && targetCutKey === cut.key}
+                      pickerId={props.pickerId}
+                      buttonRef={(el) => {
+                        if (el) props.cutEls.set(cut.key, el);
+                        else props.cutEls.delete(cut.key);
+                      }}
+                      onHover={(on) => setHoverCut((k) => (on ? cut.key : k === cut.key ? null : k))}
+                      onFocusChange={(on) => setFocusCut((k) => (on ? cut.key : k === cut.key ? null : k))}
+                      onChoose={() => props.onChooseAtCut(cut.key)}
+                    />
                   )}
                 </div>
-              )}
-            </>
-          )}
+              );
+            })}
+
+            {markerIndex !== null && (
+              <div className="insert-marker" style={{ left: x(boundaryFrame(doc, markerIndex)) }} aria-hidden="true" />
+            )}
+          </div>
+
+          <div className="playhead" style={{ left: x(playhead) }} aria-hidden="true" />
         </div>
-
-        {ppf > 0 && <div className="playhead" style={{ left: x(playhead) }} aria-hidden="true" />}
       </div>
-    </div>
-  );
-}
-
-function tooltipText(doc: Doc, limits: Limits, duration: Frames, hit: ClampResult['clamped']) {
-  return {
-    value: formatDuration(duration),
-    reason: hit === 'max' ? describeLimit(doc, limits) : hit === 'min' ? describeMinimum(limits) : null,
-  };
-}
-
-function ClipBlock({ clip, left, width, side }: { clip: Clip; left: number; width: number; side: 'a' | 'b' }) {
-  return (
-    <div className={`clip clip-${side}`} style={{ left, width }}>
-      <span className="clip-name">{clip.label}</span>
-      <span className="clip-range">
-        src {clip.sourceIn}–{clip.sourceOut - 1} of {clip.sourceFrames}
-      </span>
     </div>
   );
 }

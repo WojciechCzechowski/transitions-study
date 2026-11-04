@@ -2,8 +2,8 @@ import { clamp, type Frames } from './time';
 
 /**
  * The preset preview loops a window of the timeline around the cut:
- * [cut − D/2 − leadIn, cut + D/2 + tail), then holds the last frame for
- * `hold` frames before starting over.
+ * [cut − D/2 − leadIn, cut + D/2 + tail), kept inside the two clips at the cut,
+ * then holds the last frame for `hold` frames before starting over.
  */
 export interface LoopRange {
   readonly start: Frames;
@@ -18,11 +18,12 @@ export function loopRange(
   leadIn: Frames,
   tail: Frames,
   hold: Frames,
-  timelineLength: Frames,
+  /** Timeline span the loop must stay inside: the outgoing clip's start to the incoming clip's end. */
+  bounds: { readonly start: Frames; readonly end: Frames },
 ): LoopRange {
   const half = duration / 2;
-  const start = clamp(cut - half - leadIn, 0, Math.max(0, timelineLength - 1));
-  const end = clamp(cut + half + tail, start + 1, timelineLength);
+  const start = clamp(cut - half - leadIn, bounds.start, Math.max(bounds.start, bounds.end - 1));
+  const end = clamp(cut + half + tail, start + 1, Math.max(start + 1, bounds.end));
   return { start, end, hold: Math.max(0, hold) };
 }
 

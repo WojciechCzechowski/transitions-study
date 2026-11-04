@@ -7,6 +7,8 @@ interface Props {
   presetName: string | null;
   /** Level 1 opened from level 2 to swap the applied preset. */
   changing: boolean;
+  /** Which cut the panel acts on, e.g. “Cut 2 · Clip A → Clip B”. Null when there are no cuts. */
+  cutLabel: string | null;
   /** Level-2 heading; focused after a preset is applied. */
   editHeadingRef: Ref<HTMLHeadingElement>;
   /** From level 2: back to level 1 to swap the preset. */
@@ -18,14 +20,14 @@ interface Props {
 }
 
 /**
- * The sidebar's single tab. Level 1 is “Transitions” (pick / apply / swap);
- * level 2 is “Transitions / ‹Preset›” (edit the selected transition).
+ * The Transitions tab, acting on one cut. Level 1 is “Transitions” (pick /
+ * apply / swap); level 2 is “Transitions / ‹Preset›” (edit the selected transition).
  */
-export function TransitionsPanel({ view, presetName, changing, editHeadingRef, onChange, onBack, footer, children }: Props) {
+export function TransitionsPanel({ view, presetName, changing, cutLabel, editHeadingRef, onChange, onBack, footer, children }: Props) {
   const headingId = useId();
 
   return (
-    <section className="tpanel" aria-labelledby={headingId}>
+    <section className="tpanel" aria-labelledby={headingId} role="tabpanel">
       <header className="tpanel-head">
         {view === 'edit' && presetName ? (
           <nav className="crumbs" aria-label="Transitions">
@@ -52,6 +54,7 @@ export function TransitionsPanel({ view, presetName, changing, editHeadingRef, o
           </>
         )}
       </header>
+      {cutLabel && <p className="tpanel-cut">{cutLabel}</p>}
       {view === 'pick' && changing && presetName && (
         <p className="tpanel-sub">Pick a preset to replace {presetName}. Duration and Feel are kept.</p>
       )}

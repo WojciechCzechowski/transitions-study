@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FEEL, shortB } from './fixtures';
+import { cutAt, FEEL, shortB } from './fixtures';
 import {
   beginGesture,
   canRedo,
@@ -102,18 +102,20 @@ describe('gestures', () => {
   });
 
   it('works on real documents with value equality', () => {
-    const start = applyTransition(shortB(), 'push', FEEL, { feel: 50 });
+    const doc0 = shortB();
+    const key = cutAt(doc0).key;
+    const start = applyTransition(doc0, key, 'push', FEEL, { feel: 50 });
     if (!start.ok) throw new Error();
     let h = createHistory<Doc>(start.doc);
     h = beginGesture(h);
-    for (const d of [26, 28, 30, 28, 24]) h = updateGesture(h, setDuration(h.present, d).doc);
+    for (const d of [26, 28, 30, 28, 24]) h = updateGesture(h, setDuration(h.present, key, d).doc);
     // Back to 24 f with new objects: value-equal, so no step.
     h = endGesture(h, 'Change duration', docEquals);
     expect(h.past).toHaveLength(0);
 
-    h = commit(h, removeTransition(h.present), 'Remove transition', docEquals);
-    expect(h.present.transition).toBeNull();
+    h = commit(h, removeTransition(h.present, key), 'Remove transition', docEquals);
+    expect(h.present.transitions).toHaveLength(0);
     h = undo(h);
-    expect(h.present.transition?.presetId).toBe('push');
+    expect(h.present.transitions[0]?.presetId).toBe('push');
   });
 });

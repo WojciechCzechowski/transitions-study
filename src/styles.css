@@ -172,22 +172,6 @@ h2[tabindex='-1']:focus-visible {
   white-space: nowrap;
 }
 
-.scenario {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-
-select {
-  font: inherit;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 5px 8px;
-}
-
 .body {
   min-height: 0;
   display: grid;
@@ -224,8 +208,14 @@ select {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  padding: 0;
+  font: inherit;
   font-size: 11px;
   color: var(--muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
 }
 
 .rail-icon {
@@ -234,6 +224,10 @@ select {
   width: 40px;
   height: 36px;
   border-radius: var(--radius-sm);
+}
+
+.rail-item:hover .rail-icon {
+  background: var(--subtle);
 }
 
 .rail-item.active {
@@ -658,6 +652,91 @@ select {
   font-size: 11px;
 }
 
+/* --- library ------------------------------------------------------------- */
+
+.lpanel {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.lpanel-count {
+  font-size: 12px;
+}
+
+.library-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.library-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.library-card[aria-disabled='true'] {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.library-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--tone);
+}
+
+.library-card:hover .library-thumb {
+  border-color: var(--border-strong);
+}
+
+.library-thumb canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-duration {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #fff;
+  background: rgb(0 0 0 / 0.6);
+}
+
+.tpanel-cut {
+  padding: 10px 16px 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
 /* --- inspector (level 2) -------------------------------------------------- */
 
 .inspector {
@@ -802,8 +881,15 @@ select {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);
   align-items: start;
-  padding: 0 16px 12px 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.timeline-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 12px;
 }
 
 .track-headers {
@@ -835,7 +921,6 @@ select {
 
 .timeline-inner {
   position: relative;
-  min-width: 0;
 }
 
 .ruler {
@@ -865,6 +950,7 @@ select {
   left: 4px;
   font-size: 11px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .track {
@@ -873,38 +959,201 @@ select {
   margin-top: 4px;
 }
 
+.cut-layer {
+  display: contents;
+}
+
+/* Clip colour per library source. */
+.tone-0 {
+  --tone: var(--clip-a);
+  --tone-strong: var(--clip-a-strong);
+}
+
+.tone-1 {
+  --tone: var(--clip-b);
+  --tone-strong: var(--clip-b-strong);
+}
+
+.tone-2 {
+  --tone: #dde8d8;
+  --tone-strong: #94b38a;
+}
+
+.tone-3 {
+  --tone: #e6ddec;
+  --tone-strong: #a990bd;
+}
+
 .clip {
   position: absolute;
   top: 20px;
   height: 72px;
+}
+
+.clip-body {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 6px 8px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid rgb(0 0 0 / 0.08);
-  overflow: hidden;
+  background: var(--tone);
   color: var(--text);
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  /* Hairline between neighbouring clips. */
+  box-shadow: inset 1px 0 0 rgb(0 0 0 / 0.25);
 }
 
-.clip-a {
-  background: var(--clip-a);
+.clip.compact .clip-body {
+  padding: 6px 4px;
 }
 
-.clip-b {
-  background: var(--clip-b);
-  /* Hairline at the cut. */
-  box-shadow: inset 1px 0 0 rgb(0 0 0 / 0.35);
+.clip.selected .clip-body {
+  border-color: var(--select);
+  box-shadow: 0 0 0 1px var(--select);
+}
+
+.clip.moving .clip-body {
+  opacity: 0.55;
+  cursor: grabbing;
 }
 
 .clip-name {
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .clip-range {
   font-size: 11px;
   color: rgb(0 0 0 / 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trim-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.grip-start {
+  left: 0;
+}
+
+.grip-end {
+  right: 0;
+}
+
+.trim-grip::after {
+  content: '';
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--tone-strong);
+  opacity: 0;
+  transition: opacity 100ms;
+}
+
+.grip-start::after {
+  left: 3px;
+}
+
+.grip-end::after {
+  right: 3px;
+}
+
+.clip:hover .trim-grip::after,
+.clip.selected .trim-grip::after,
+.trim-grip:focus-visible::after {
+  opacity: 1;
+}
+
+.trim-grip:hover::after,
+.trim-grip:active::after {
+  background: var(--text);
+}
+
+.clip-tooltip {
+  bottom: calc(100% + 26px);
+}
+
+.insert-marker {
+  position: absolute;
+  top: 12px;
+  height: 88px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--text);
+  pointer-events: none;
+  z-index: 7;
+}
+
+.insert-marker::before,
+.insert-marker::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  width: 11px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text);
+}
+
+.insert-marker::before {
+  top: 0;
+}
+
+.insert-marker::after {
+  bottom: 0;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  transform: translate(-50%, -130%);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgb(0 0 0 / 0.15);
+  background: var(--tone);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--shadow-pop);
+  pointer-events: none;
+}
+
+.drag-ghost.outside {
+  opacity: 0.6;
+}
+
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.zoom input[type='range'] {
+  width: 88px;
+  accent-color: var(--primary);
+}
+
+.zoom .btn {
+  margin-left: 6px;
 }
 
 .handle-strip {
@@ -962,10 +1211,11 @@ select {
   pointer-events: none;
 }
 
+/* Sits on the clips' top edge (clips start at 20px), so the trim grips below stay free. */
 .cut-zone {
   position: absolute;
-  top: 20px;
-  height: 72px;
+  top: 4px;
+  height: 32px;
   width: 32px;
   transform: translateX(-50%);
   display: flex;
@@ -1021,7 +1271,7 @@ select {
   padding: 0 10px;
   border-radius: var(--radius-sm);
   border: 1px solid rgb(0 0 0 / 0.35);
-  background: linear-gradient(90deg, var(--clip-a-strong), var(--clip-b-strong));
+  background: linear-gradient(90deg, rgb(0 0 0 / 0.22), rgb(0 0 0 / 0.1)), var(--surface);
   color: var(--text);
   font: inherit;
   font-size: 12px;

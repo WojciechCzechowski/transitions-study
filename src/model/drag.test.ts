@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dragDuration, pxToFrames, requestedFromDrag } from './dragDuration';
-import { generous, shortB } from './fixtures';
-import { getLimits } from './timeline';
+import { generous, limitsAt, shortB } from './fixtures';
 
 describe('edge drag → duration', () => {
   it('grows symmetrically: each frame of edge travel adds one frame per side', () => {
@@ -28,19 +27,19 @@ describe('edge drag → duration', () => {
   });
 
   it('stops at the handle limit and reports the clamp', () => {
-    const limits = getLimits(shortB()); // max 36
+    const limits = limitsAt(shortB()); // max 36
     const r = dragDuration(24, 'right', 200, 7.5, limits);
     expect(r).toMatchObject({ duration: 36, clamped: 'max' });
     expect(r.requested).toBeGreaterThan(36);
   });
 
   it('stops at the minimum', () => {
-    const r = dragDuration(24, 'left', 500, 7.5, getLimits(generous()));
+    const r = dragDuration(24, 'left', 500, 7.5, limitsAt(generous()));
     expect(r).toMatchObject({ duration: 2, clamped: 'min' });
   });
 
   it('is unclamped inside the limits', () => {
-    const r = dragDuration(24, 'right', 15, 7.5, getLimits(generous()));
+    const r = dragDuration(24, 'right', 15, 7.5, limitsAt(generous()));
     expect(r).toEqual({ duration: 28, clamped: null, requested: 28 });
   });
 });

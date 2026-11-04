@@ -11,12 +11,13 @@ import type { FrameStore } from '../media/FrameStore';
 import { cubicBezier, type Bezier } from '../model/easing';
 import { feelEasing, feelIntensity } from '../model/feel';
 import { loopFrameAt, loopRange, onceFrameAt, rebaseElapsed, type LoopRange } from '../model/previewLoop';
-import { cutFrame, resolveFrame, timelineLength, type Doc, type Transition } from '../model/timeline';
+import { clipStarts, cutByKey, resolveFrame, timelineLength, visibleLength, type Doc, type FrameRef, type TransitionOverride } from '../model/timeline';
 import { clamp, FPS, type Frames } from '../model/time';
 import type { Renderer } from '../render/Renderer';
 
-/** What a preview shows: a preset at a duration and feel, centred on the cut. */
+/** What a preview shows: a preset at a duration and feel, centred on one cut. */
 export interface PreviewCandidate {
+  readonly cutKey: string;
   readonly presetId: string;
   readonly duration: Frames;
   readonly feel: number;
@@ -26,9 +27,11 @@ export interface FrameInfo {
   readonly mode: 'timeline' | 'preview';
   readonly t: Frames;
   readonly presetId?: string;
-  /** Source frames actually drawn. */
-  readonly a?: Frames;
-  readonly b?: Frames;
+  /** Source frame drawn outside a transition. */
+  readonly source?: FrameRef;
+  /** Source frames drawn inside a transition. */
+  readonly from?: FrameRef;
+  readonly to?: FrameRef;
   readonly linear?: number;
   readonly eased?: number;
   /** False when a requested frame was not decoded and a neighbour was drawn. */
@@ -172,9 +175,13 @@ export class PreviewController {
       this.mode = { kind: 'idle' };
       this.cb.onPlayingChange(false);
     }
+    const cutInfo = cutByKey(doc, candidate.cutKey);
+    if (!cutInfo) return;
     const { leadIn, tail, hold } = TRANSITION_DEFAULTS.preview;
-    const cut = cutFrame(doc);
-    const range = loopRange(cut, candidate.duration, leadIn, tail, hold, timelineLength(doc));
+    const starts = clipStarts(doc);
+    const bounds = { start: starts[cutInfo.index]!, end: cutInfo.frame + visibleLength(cutInfo.to) };
+    const cut = cutInfo.frame;
+    const range = loopRange(cut, candidate.duration, leadIn, tail, hold, bounds);
     const still = clamp(cut, range.start, range.end - 1);
     const now = this.now();
     const prev = this.mode.kind === 'preview' ? this.mode : null;
@@ -305,30 +312,32 @@ export class PreviewController {
     const m = this.mode;
     const isPreview = m.kind === 'preview';
     const t = isPreview ? m.frame : this.playhead;
-    const transition: Transition | null = isPreview ? { id: 'preview', ...m.candidate } : doc.transition;
-    const r = resolveFrame(doc, t, transition);
+    const override: TransitionOverride | undefined = isPreview
+      ? { cutKey: m.candidate.cutKey, look: m.candidate }
+      : undefined;
+    const r = resolveFrame(doc, t, override);
     const mode = isPreview ? 'preview' : 'timeline';
+    const presetId = isPreview ? m.candidate.presetId : undefined;
 
     if (r.kind === 'single') {
-      const look = this.store.get(r.source.clipId, r.source.frame);
+      const look = this.store.get(r.source.sourceId, r.source.frame);
       if (!look) return;
-      const key = `s|${r.source.clipId}|${look.frame}`;
+      const key = `s|${r.source.sourceId}|${look.frame}`;
       if (key !== this.lastKey) {
         renderer.drawSingle(look.bitmap);
         this.lastKey = key;
       }
-      const side = r.source.clipId === doc.a.id ? 'a' : 'b';
-      this.cb.onFrameInfo({ mode, t: r.t, [side]: look.frame, exact: look.exact, presetId: transition?.presetId });
+      this.cb.onFrameInfo({ mode, t: r.t, source: { sourceId: r.source.sourceId, frame: look.frame }, exact: look.exact, presetId });
       return;
     }
 
     const preset = getPreset(r.presetId);
-    const from = this.store.get(r.from.clipId, r.from.frame);
-    const to = this.store.get(r.to.clipId, r.to.frame);
+    const from = this.store.get(r.from.sourceId, r.from.frame);
+    const to = this.store.get(r.to.sourceId, r.to.frame);
     if (!from || !to) return;
     const eased = this.ease(feelEasing(r.feel, preset.feel))(r.linear);
     const intensity = feelIntensity(r.feel, preset.feel);
-    const key = `t|${preset.id}|${from.frame}|${to.frame}|${eased}|${intensity}|${preset.params.join(',')}`;
+    const key = `t|${preset.id}|${r.from.sourceId}:${from.frame}|${r.to.sourceId}:${to.frame}|${eased}|${intensity}|${preset.params.join(',')}`;
     if (key !== this.lastKey) {
       renderer.drawTransition({
         programId: preset.id,
@@ -345,8 +354,8 @@ export class PreviewController {
       mode,
       t: r.t,
       presetId: preset.id,
-      a: from.frame,
-      b: to.frame,
+      from: { sourceId: r.from.sourceId, frame: from.frame },
+      to: { sourceId: r.to.sourceId, frame: to.frame },
       linear: r.linear,
       eased,
       exact: from.exact && to.exact,

@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PRESETS } from '../config/transitions.config';
 import { cubicBezier, LINEAR, lerpBezier } from './easing';
 import { feelDuration, feelEasing, feelIntensity, feelToParams } from './feel';
-import { FEEL, generous, shortB } from './fixtures';
-import { getLimits } from './timeline';
+import { FEEL, generous, limitsAt, shortB } from './fixtures';
 
 describe('feel mapping', () => {
   it('maps the ends exactly to the snappy and smooth endpoints', () => {
@@ -38,7 +37,7 @@ describe('feel mapping', () => {
   });
 
   it('clamps duration to the handles and flags it', () => {
-    const p = feelToParams(100, FEEL, getLimits(shortB()));
+    const p = feelToParams(100, FEEL, limitsAt(shortB()));
     expect(p.requested).toBe(40);
     expect(p.duration).toBe(36);
     expect(p.clamped).toBe('max');
@@ -47,12 +46,12 @@ describe('feel mapping', () => {
   });
 
   it('does not flag when the handles are long enough', () => {
-    const p = feelToParams(100, FEEL, getLimits(generous()));
+    const p = feelToParams(100, FEEL, limitsAt(generous()));
     expect(p).toMatchObject({ duration: 40, clamped: null });
   });
 
   it('works with every configured preset', () => {
-    const limits = getLimits(generous());
+    const limits = limitsAt(generous());
     for (const preset of PRESETS) {
       const snappy = feelToParams(0, preset.feel, limits);
       const smooth = feelToParams(100, preset.feel, limits);

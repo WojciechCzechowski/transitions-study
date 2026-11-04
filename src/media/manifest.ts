@@ -14,7 +14,8 @@ export interface ManifestClip {
 export interface Manifest {
   readonly fps: number;
   readonly source: string;
-  readonly clips: readonly [ManifestClip, ManifestClip];
+  /** Library clips, in manifest order. The starting timeline uses the first two. */
+  readonly clips: readonly ManifestClip[];
 }
 
 export const clipUrl = (file: string) => `${CLIPS_BASE_URL}${encodeURIComponent(file)}`;
@@ -51,8 +52,8 @@ function validate(data: unknown): Manifest {
   if (typeof data !== 'object' || data === null) throw bad('expected an object');
   const m = data as Record<string, unknown>;
   if (m.fps !== FPS) throw bad(`expected fps ${FPS}, got ${String(m.fps)}`);
-  if (!Array.isArray(m.clips) || m.clips.length < 2) throw bad('expected two clips');
-  const clips = m.clips.slice(0, 2).map((c: unknown, i) => {
+  if (!Array.isArray(m.clips) || m.clips.length < 2) throw bad('expected at least two clips');
+  const clips = m.clips.map((c: unknown, i) => {
     const o = (c ?? {}) as Record<string, unknown>;
     const ok =
       typeof o.id === 'string' &&
@@ -71,7 +72,9 @@ function validate(data: unknown): Manifest {
       height: o.height as number,
     };
   });
-  return { fps: FPS, source: typeof m.source === 'string' ? m.source : 'unknown', clips: [clips[0]!, clips[1]!] };
+  const ids = new Set(clips.map((c) => c.id));
+  if (ids.size !== clips.length) throw bad('clip ids must be unique');
+  return { fps: FPS, source: typeof m.source === 'string' ? m.source : 'unknown', clips };
 }
 
 /** Fail early with a clear "not found" before handing a URL to <video>. */
