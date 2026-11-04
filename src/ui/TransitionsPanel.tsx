@@ -15,7 +15,6 @@ interface Props {
   onChange: () => void;
   /** While swapping: back to level 2 without changing anything. */
   onBack: () => void;
-  footer: ReactNode;
   children: ReactNode;
 }
 
@@ -23,7 +22,7 @@ interface Props {
  * The Transitions tab, acting on one cut. Level 1 is “Transitions” (pick /
  * apply / swap); level 2 is “Transitions / ‹Preset›” (edit the selected transition).
  */
-export function TransitionsPanel({ view, presetName, changing, cutLabel, editHeadingRef, onChange, onBack, footer, children }: Props) {
+export function TransitionsPanel({ view, presetName, changing, cutLabel, editHeadingRef, onChange, onBack, children }: Props) {
   const headingId = useId();
 
   return (
@@ -59,7 +58,6 @@ export function TransitionsPanel({ view, presetName, changing, cutLabel, editHea
         <p className="tpanel-sub">Pick a preset to replace {presetName}. Duration and Feel are kept.</p>
       )}
       <div className="tpanel-body">{children}</div>
-      <footer className="tpanel-foot">{footer}</footer>
     </section>
   );
 }

@@ -172,6 +172,96 @@ h2[tabindex='-1']:focus-visible {
   white-space: nowrap;
 }
 
+.topbar-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-help kbd {
+  line-height: 15px;
+}
+
+/* --- shortcuts dialog ------------------------------------------------------ */
+
+.modal {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+}
+
+.modal::backdrop {
+  background: rgb(0 0 0 / 0.25);
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 10px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-head h2 {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 20px 20px;
+  overflow: auto;
+}
+
+.shortcut-group h3 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.shortcut-list {
+  margin: 0;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+
+.shortcut-row + .shortcut-row {
+  border-top: 1px solid var(--border);
+}
+
+.shortcut-row dd {
+  flex: none;
+  margin: 0;
+}
+
+.keys {
+  display: inline-flex;
+  gap: 4px;
+}
+
 .body {
   min-height: 0;
   display: grid;
@@ -534,22 +624,17 @@ h2[tabindex='-1']:focus-visible {
   padding: 12px 16px 16px;
 }
 
-.tpanel-foot {
-  padding: 10px 16px 12px;
-  border-top: 1px solid var(--border);
-}
-
-.shortcuts {
-  font-size: 11px;
-  line-height: 1.7;
-}
-
 .notice {
   color: var(--warn);
   background: var(--warn-bg);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 12px;
+}
+
+.notice.info {
+  color: var(--text);
+  background: var(--subtle);
 }
 
 /* --- gallery (level 1) ---------------------------------------------------- */
@@ -618,6 +703,21 @@ h2[tabindex='-1']:focus-visible {
 .preset[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Presets can still be dragged onto a cut when click-apply is off, so they don't look dead. */
+.gallery.can-drag .preset {
+  touch-action: none;
+}
+
+.gallery.can-drag .preset[aria-disabled='true'] {
+  opacity: 1;
+  cursor: grab;
+}
+
+.preset.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
 }
 
 .preset-icon {
@@ -1139,6 +1239,38 @@ h2[tabindex='-1']:focus-visible {
 
 .drag-ghost.outside {
   opacity: 0.6;
+}
+
+.preset-ghost {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--surface);
+}
+
+.preset-ghost-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.drag-ghost.invalid .preset-ghost-note {
+  color: var(--warn);
+}
+
+/* The cut under a preset drag. */
+.cut-layer.drop-target .transition-object {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 9px;
+}
+
+.cut-layer.drop-invalid .cut-handle {
+  opacity: 1;
+  transform: none;
+  border-color: var(--warn);
+  color: var(--warn);
+  cursor: not-allowed;
 }
 
 .zoom {

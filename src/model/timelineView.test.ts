@@ -1,6 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { makeDoc } from './fixtures';
-import { boundaryFrame, clampZoom, fitScale, insertionIndex, rulerLabel, sliderToZoom, tickStep, ZOOM, zoomToSlider } from './timelineView';
+import { FEEL, cutAt, makeDoc } from './fixtures';
+import { applyTransition } from './ops';
+import {
+  boundaryFrame,
+  clampZoom,
+  cutAtFrame,
+  fitScale,
+  insertionIndex,
+  rulerLabel,
+  sliderToZoom,
+  tickStep,
+  ZOOM,
+  zoomToSlider,
+} from './timelineView';
+
+describe('cutAtFrame', () => {
+  // Cuts at 60 and 100. Generous handles so a transition fits on the second cut.
+  const doc = makeDoc({ head: 15, visible: 60 }, { head: 45, visible: 40 }, { head: 45, visible: 30 });
+
+  it('picks the nearest cut within the tolerance', () => {
+    expect(cutAtFrame(doc, 60, 5)?.key).toBe(cutAt(doc, 0).key);
+    expect(cutAtFrame(doc, 64, 5)?.key).toBe(cutAt(doc, 0).key);
+    expect(cutAtFrame(doc, 97, 5)?.key).toBe(cutAt(doc, 1).key);
+  });
+
+  it('returns null away from every cut', () => {
+    expect(cutAtFrame(doc, 80, 5)).toBeNull();
+    expect(cutAtFrame(doc, 0, 5)).toBeNull();
+    expect(cutAtFrame(makeDoc({ head: 0, visible: 60 }), 60, 5)).toBeNull();
+  });
+
+  it('reaches across an existing transition', () => {
+    const r = applyTransition(doc, cutAt(doc, 1).key, 'push', FEEL, { feel: 0 });
+    if (!r.ok) throw new Error('expected a transition');
+    const half = r.transition.duration / 2;
+    expect(cutAtFrame(r.doc, 100 - half - 4, 5)?.key).toBe(cutAt(r.doc, 1).key);
+    expect(cutAtFrame(r.doc, 100 - half - 6, 5)).toBeNull();
+  });
+});
 
 describe('insertionIndex', () => {
   // [0,60) [60,100) [100,130)

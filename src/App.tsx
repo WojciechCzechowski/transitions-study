@@ -12,6 +12,7 @@ import { Editor } from './ui/Editor';
 import { installModalityTracking, useAnnouncer, useReducedMotion } from './ui/hooks';
 import { Preview, type LoadState } from './ui/Preview';
 import { Shell } from './ui/Shell';
+import { ShortcutsDialog } from './ui/ShortcutsDialog';
 
 function toStudyError(e: unknown): StudyError {
   if (e instanceof StudyError) return e;
@@ -155,6 +156,7 @@ export function App() {
       </nav>
       <span className="spacer" />
       <span className="topbar-note muted">Unofficial interaction study</span>
+      <ShortcutsDialog />
     </>
   );
 

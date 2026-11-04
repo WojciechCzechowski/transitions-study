@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type RefCallback } from 'react';
 
+/** Apple platforms use ⌘ where others use Ctrl. */
+export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+export const modKey = isMac ? '⌘' : 'Ctrl';
+
+/** True when a key press should go to a text field rather than to app shortcuts. */
+export function isTextEntry(el: HTMLElement | null): boolean {
+  const tag = el?.tagName;
+  return (
+    (tag === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes((el as HTMLInputElement).type)) ||
+    tag === 'TEXTAREA' ||
+    !!el?.isContentEditable
+  );
+}
+
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
 /** Live `prefers-reduced-motion` value. */

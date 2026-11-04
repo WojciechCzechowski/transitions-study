@@ -11,7 +11,7 @@ import {
   type ClampResult,
   type Doc,
 } from '../model/timeline';
-import { boundaryFrame, insertionIndex, rulerLabel, tickStep } from '../model/timelineView';
+import { boundaryFrame, cutAtFrame, insertionIndex, rulerLabel, tickStep } from '../model/timelineView';
 import { clamp, FPS, formatTimecode, type Frames } from '../model/time';
 import { ClipItem, trimLimitText, type TrimFeedback } from './ClipItem';
 import { CutZone } from './CutZone';
@@ -24,7 +24,12 @@ export type Selection = { readonly kind: 'clip' | 'transition'; readonly id: str
 export interface TimelineApi {
   /** Insertion index under the pointer, or null when it's not over the timeline. */
   hit(clientX: number, clientY: number): number | null;
+  /** Key of the cut a preset dropped here would land on, or null. */
+  hitCut(clientX: number, clientY: number): string | null;
 }
+
+/** How far (px) from a cut, or from its transition's edges, a preset drop still lands on it. */
+const CUT_DROP_PX = 28;
 
 interface Props {
   doc: Doc;
@@ -39,6 +44,9 @@ interface Props {
   pickerId: string;
   /** Insertion marker for a Library drag. */
   dropIndex: number | null;
+  /** The cut under a preset drag, and whether it can take a transition. */
+  dropCutKey: string | null;
+  dropCutValid: boolean;
   /** Focus targets the editor moves focus to. */
   cutEls: Map<string, HTMLButtonElement>;
   transitionEls: Map<string, HTMLButtonElement>;
@@ -99,13 +107,21 @@ export function Timeline(props: Props) {
     return rect ? (clientX - rect.left) / (ppf || 1) : 0;
   };
 
+  const overTimeline = (clientX: number, clientY: number) => {
+    const el = scrollEl.current;
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+  };
+
   useImperativeHandle(props.apiRef, () => ({
     hit(clientX, clientY) {
-      const el = scrollEl.current;
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+      if (!overTimeline(clientX, clientY)) return null;
       return insertionIndex(latest.current.doc, frameAtClientX(clientX));
+    },
+    hitCut(clientX, clientY) {
+      if (!overTimeline(clientX, clientY)) return null;
+      return cutAtFrame(latest.current.doc, frameAtClientX(clientX), CUT_DROP_PX / (ppf || 1))?.key ?? null;
     },
   }));
 
@@ -338,13 +354,21 @@ export function Timeline(props: Props) {
             {cutList.map((cut) => {
               const t = transitionAt(doc, cut.key);
               const limits = getLimits(doc, cut);
+              const dropHere = props.dropCutKey === cut.key;
               const showStrips =
-                hoverCut === cut.key || focusCut === cut.key || engagedCut === cut.key || (pickerActive && targetCutKey === cut.key);
+                dropHere ||
+                hoverCut === cut.key ||
+                focusCut === cut.key ||
+                engagedCut === cut.key ||
+                (pickerActive && targetCutKey === cut.key);
               const aTail = limits.available.aTail;
               const bHead = limits.available.bHead;
               const half = t ? t.duration / 2 : 0;
               return (
-                <div key={cut.key} className="cut-layer">
+                <div
+                  key={cut.key}
+                  className={`cut-layer${dropHere ? (props.dropCutValid ? ' drop-target' : ' drop-invalid') : ''}`}
+                >
                   {showStrips && (
                     <>
                       <div
@@ -391,7 +415,7 @@ export function Timeline(props: Props) {
                       cut={cut}
                       left={x(cut.frame)}
                       ready={ready}
-                      engaged={pickerActive && targetCutKey === cut.key}
+                      engaged={(pickerActive && targetCutKey === cut.key) || (dropHere && props.dropCutValid)}
                       pickerId={props.pickerId}
                       buttonRef={(el) => {
                         if (el) props.cutEls.set(cut.key, el);

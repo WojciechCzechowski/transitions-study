@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent, type Ref } from 'react';
+import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type Ref } from 'react';
 import type { PresetConfig } from '../config/transitions.config';
 import { nextGalleryIndex } from '../model/galleryNav';
 import { lastInputWasKeyboard } from './hooks';
@@ -8,8 +8,18 @@ interface Props {
   presets: readonly PresetConfig[];
   appliedId: string | null;
   previewId: string | null;
-  /** When set, presets are shown but cannot be previewed or applied. */
+  /** When set, presets are shown but cannot be previewed or applied by click / Enter. */
   disabledReason: string | null;
+  /** 'info' for a prompt (no cut chosen yet), 'warn' for a problem. */
+  noticeTone: 'info' | 'warn';
+  /** Tiles can be dragged onto any cut in the timeline, even while click-apply is off. */
+  draggable: boolean;
+  /** The tile being dragged, if any. */
+  draggingId: string | null;
+  /** Pointer drag lifecycle; the editor hit-tests cuts and draws the ghost. */
+  onDragStart: (presetId: string, clientX: number, clientY: number) => void;
+  onDragMove: (clientX: number, clientY: number) => void;
+  onDragEnd: (commit: boolean) => void;
   /** The listbox; the editor focuses its current tab stop from + at the cut. */
   listRef: Ref<HTMLDivElement>;
   /** Id for the listbox, so the cut handle can point at it. */
@@ -32,8 +42,14 @@ interface Props {
  * preview. Previews revert only when the pointer leaves the whole picker or
  * focus moves outside it, so moving between tiles never flashes the timeline.
  */
+const DRAG_THRESHOLD_PX = 4;
+
 export function Gallery(props: Props) {
-  const { presets, appliedId, previewId, disabledReason, reducedMotion, previewActive, previewPlaying } = props;
+  const { presets, appliedId, previewId, disabledReason, noticeTone, draggable, draggingId, reducedMotion, previewActive, previewPlaying } =
+    props;
+  const press = useRef<{ pointerId: number; id: string; x: number; y: number; dragging: boolean } | null>(null);
+  /** The last press turned into a drag, so the click that follows it isn't an apply. */
+  const dragged = useRef(false);
   const initial = Math.max(0, presets.findIndex((p) => p.id === appliedId));
   const [focusIndex, setFocusIndex] = useState(initial);
   const items = useRef<(HTMLDivElement | null)[]>([]);
@@ -80,8 +96,37 @@ export function Gallery(props: Props) {
     }
   };
 
+  const onTilePointerDown = (e: PointerEvent<HTMLDivElement>, id: string) => {
+    dragged.current = false;
+    if (e.button !== 0 || !draggable) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    press.current = { pointerId: e.pointerId, id, x: e.clientX, y: e.clientY, dragging: false };
+  };
+  const onTilePointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const p = press.current;
+    if (!p || p.pointerId !== e.pointerId) return;
+    if (!p.dragging && Math.hypot(e.clientX - p.x, e.clientY - p.y) >= DRAG_THRESHOLD_PX) {
+      p.dragging = true;
+      dragged.current = true;
+      props.onDragStart(p.id, e.clientX, e.clientY);
+    }
+    if (p.dragging) props.onDragMove(e.clientX, e.clientY);
+  };
+  const onTilePointerUp = (e: PointerEvent<HTMLDivElement>, cancelled = false) => {
+    const p = press.current;
+    if (!p || p.pointerId !== e.pointerId) return;
+    press.current = null;
+    if (p.dragging) props.onDragEnd(!cancelled);
+  };
+
   const onRootKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && press.current?.dragging) {
+      // Esc mid-drag cancels the drag only; the pointer-up that follows does nothing.
+      e.preventDefault();
+      e.stopPropagation();
+      press.current = null;
+      props.onDragEnd(false);
+    } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
       props.onEscape();
@@ -104,7 +149,7 @@ export function Gallery(props: Props) {
   return (
     <div
       ref={rootRef}
-      className="gallery"
+      className={`gallery${draggable ? ' can-drag' : ''}`}
       role="group"
       aria-label="Transition picker"
       onPointerEnter={() => setActive('pointer', true)}
@@ -117,7 +162,7 @@ export function Gallery(props: Props) {
       onKeyDown={onRootKeyDown}
     >
       {disabled ? (
-        <p className="notice" id={noticeId} role="note">
+        <p className={`notice${noticeTone === 'info' ? ' info' : ''}`} id={noticeId} role="note">
           {disabledReason}
         </p>
       ) : (
@@ -153,16 +198,26 @@ export function Gallery(props: Props) {
               items.current[i] = el;
             }}
             role="option"
-            className={`preset${previewId === p.id ? ' previewing' : ''}${appliedId === p.id ? ' applied' : ''}`}
+            className={`preset${previewId === p.id ? ' previewing' : ''}${appliedId === p.id ? ' applied' : ''}${draggingId === p.id ? ' dragging' : ''}`}
             tabIndex={i === focusIndex ? 0 : -1}
             aria-selected={appliedId === p.id}
             aria-disabled={disabled || undefined}
-            onPointerEnter={() => !disabled && props.onPreview(p.id)}
+            onPointerEnter={() => !disabled && !draggingId && props.onPreview(p.id)}
+            onPointerDown={(e) => onTilePointerDown(e, p.id)}
+            onPointerMove={onTilePointerMove}
+            onPointerUp={(e) => onTilePointerUp(e)}
+            onPointerCancel={(e) => onTilePointerUp(e, true)}
             onFocus={() => {
               setFocusIndex(i);
               if (!disabled && lastInputWasKeyboard()) props.onPreview(p.id);
             }}
-            onClick={() => props.onApply(p.id)}
+            onClick={() => {
+              if (dragged.current) {
+                dragged.current = false;
+                return;
+              }
+              props.onApply(p.id);
+            }}
           >
             <span className="preset-thumb">
               <PresetIcon id={p.id} />
@@ -174,7 +229,7 @@ export function Gallery(props: Props) {
         ))}
       </div>
       <p className="gallery-keys muted" id={hintId}>
-        Arrows move and preview · Enter apply · Space play/pause · Esc back
+        {draggable ? 'Drag a preset onto any cut · ' : ''}Arrows move and preview · Enter apply · Space play/pause · Esc back
       </p>
     </div>
   );

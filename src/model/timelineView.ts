@@ -2,7 +2,7 @@
  * Pure helpers for drawing and hit-testing the timeline: magnetic insertion
  * points, ruler tick spacing and zoom.
  */
-import { clipStarts, timelineLength, type Doc } from './timeline';
+import { clipStarts, cuts, timelineLength, transitionAt, type Cut, type Doc } from './timeline';
 import { FPS, type Frames } from './time';
 
 /** Nearest clip boundary (0 … clips.length) to a timeline frame: where a drop or move lands. */
@@ -11,6 +11,26 @@ export function insertionIndex(doc: Doc, frame: number): number {
   let best = 0;
   for (let i = 1; i < bounds.length; i++) {
     if (Math.abs(bounds[i]! - frame) < Math.abs(bounds[best]! - frame)) best = i;
+  }
+  return best;
+}
+
+/**
+ * The cut a preset drag at `frame` lands on: the nearest cut within `tolerance`
+ * frames of the cut itself, or of the edges of a transition already on it.
+ * Null when no cut is close enough. Dropping mid-clip never picks a far cut.
+ */
+export function cutAtFrame(doc: Doc, frame: number, tolerance: number): Cut | null {
+  let best: Cut | null = null;
+  let bestDist = Infinity;
+  for (const cut of cuts(doc)) {
+    const t = transitionAt(doc, cut.key);
+    const reach = tolerance + (t ? t.duration / 2 : 0);
+    const dist = Math.abs(frame - cut.frame);
+    if (dist <= reach && dist < bestDist) {
+      best = cut;
+      bestDist = dist;
+    }
   }
   return best;
 }
