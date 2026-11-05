@@ -46,6 +46,11 @@ export interface Transition {
   readonly easing?: Bezier;
   /** Fine-tune: an intensity that replaces the one from Feel. */
   readonly intensity?: number;
+  /**
+   * Frames trimmed off the clips (in total) to make room for this transition, kept so the
+   * timeline can say why later. A side is dropped once that clip edge is trimmed by hand.
+   */
+  readonly madeRoom?: Room;
 }
 
 /** The undoable document: clips back to back, and at most one transition per cut. */

@@ -76,7 +76,15 @@ function tuned(t: Transition, easing: Bezier | undefined, intensity: number | un
     feel,
     ...(easing !== undefined && { easing }),
     ...(intensity !== undefined && { intensity }),
+    ...(t.madeRoom && { madeRoom: t.madeRoom }),
   };
+}
+
+/** `t` remembering `room` on top of what it already made room for. */
+function withMadeRoom(t: Transition, room: Room): Transition {
+  if (room === NO_ROOM) return t;
+  const prev = t.madeRoom ?? NO_ROOM;
+  return { ...t, madeRoom: { a: prev.a + room.a, b: prev.b + room.b } };
 }
 
 /**
@@ -128,12 +136,13 @@ export function applyTransition(
       : { ...tuned(existing, existing.easing, undefined), presetId, duration };
     // A longer drafted duration may need room the handles don't have.
     const room = duration > existing.duration ? fitAtCut(doc, cut, duration) : { doc, trimmed: NO_ROOM };
+    const fitted = withMadeRoom(next, room.trimmed);
     return {
       ok: true,
-      doc: normalize(replaceTransition(room.doc, existing, next)),
+      doc: normalize(replaceTransition(room.doc, existing, fitted)),
       replaced: true,
       clamped,
-      transition: next,
+      transition: fitted,
       trimmed: room.trimmed,
     };
   }
@@ -150,6 +159,7 @@ export function applyTransition(
     feel: normalizeFeel(look?.feel ?? options.feel),
     ...(look?.easing !== undefined && { easing: look.easing }),
     ...(look?.intensity !== undefined && { intensity: normalizeIntensity(look.intensity) }),
+    ...(room.trimmed !== NO_ROOM && { madeRoom: room.trimmed }),
   };
   const base = room.doc;
   return {
@@ -187,7 +197,11 @@ export function setDuration(doc: Doc, cutKey: string, requested: number): EditRe
   if (duration === t.duration) return { doc, clamped, trimmed: NO_ROOM };
   const room = fitAtCut(doc, cut, duration);
   const next = transitionAt(room.doc, cutKey)!;
-  return { doc: normalize(replaceTransition(room.doc, next, { ...next, duration })), clamped, trimmed: room.trimmed };
+  return {
+    doc: normalize(replaceTransition(room.doc, next, { ...withMadeRoom(next, room.trimmed), duration })),
+    clamped,
+    trimmed: room.trimmed,
+  };
 }
 
 /** Feel sets easing and intensity together, replacing any Fine-tune overrides. Duration is untouched. */
@@ -435,7 +449,15 @@ export function trimClip(doc: Doc, id: string, edge: TrimEdge, requested: Frames
   if (value === current) return { doc, limit };
   const nextClip = edge === 'start' ? { ...clip, sourceIn: value } : { ...clip, sourceOut: value };
   const clips = doc.clips.map((c, k) => (k === i ? nextClip : c));
-  return { doc: normalize({ ...doc, clips }), limit };
+  // Trimming that edge by hand takes it over: the transition no longer explains it.
+  const transitions = doc.transitions.map((t) => {
+    const side = edge === 'start' && t.toId === id ? 'b' : edge === 'end' && t.fromId === id ? 'a' : null;
+    if (!side || !t.madeRoom?.[side]) return t;
+    const { madeRoom, ...rest } = t;
+    const left = { ...madeRoom, [side]: 0 };
+    return left.a === 0 && left.b === 0 ? rest : { ...rest, madeRoom: left };
+  });
+  return { doc: normalize({ ...doc, clips, transitions }), limit };
 }
 
 /** The transition that a trim limit refers to, for messages. */

@@ -266,16 +266,15 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
   /** The trim made by a duration change at `cutKey` (if any), with why, shown as a toast. `after` is the edited timeline. */
   const notifyTrim = (cutKey: string, trimmed: Room, after: Doc) => {
     if (trimmed === NO_ROOM) return;
-    const cut = cutByKey(after, cutKey);
     const t = transitionAt(after, cutKey);
-    if (cut && t) notify(describeTrim(cut, trimmed, t.duration));
+    if (t) notify(describeTrim(trimmed, t.duration));
   };
 
-  /** Announce `text` and also show it in a toast with Undo: for side effects worth seeing. */
+  /** Announce `text` and also show a toast with Undo (`shown`, a shorter form, or the same): for side effects worth seeing. */
   const notify = useCallback(
-    (text: string) => {
+    (text: string, shown: string = text) => {
       announce(text);
-      setToast((t) => ({ text, n: (t?.n ?? 0) + 1, anchor: null }));
+      setToast((t) => ({ text: shown, n: (t?.n ?? 0) + 1, anchor: null }));
     },
     [announce],
   );
@@ -369,7 +368,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     const cut = cutByKey(doc, key);
     if (cut) {
       const l = getLimits(doc, cut);
-      if (!l.canTransition) announce(describeNoHandles(cut, l));
+      if (!l.canTransition) announce(describeNoHandles(l));
     }
   };
 
@@ -470,7 +469,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     const draft = drafts[id];
     const r = applyTransition(doc, target.key, id, applyOptions(id));
     if (!r.ok) {
-      if (r.limits) announce(describeNoHandles(target, r.limits));
+      if (r.limits) announce(describeNoHandles(r.limits));
       return;
     }
     if (r.doc !== doc) commitDoc(r.doc, r.replaced ? `Change to ${preset.name}` : `Apply ${preset.name}`);
@@ -487,13 +486,16 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     setSelection({ kind: 'transition', id: r.transition.id });
     setTab('transitions');
     const cut = cutByKey(r.doc, target.key)!;
-    const capped = r.clamped === 'max' ? ` ${describeLimit(cut, getLimits(r.doc, cut))}.` : '';
-    const trimmed = r.trimmed !== NO_ROOM ? ` ${describeTrim(cut, r.trimmed, r.transition.duration)}` : '';
-    // A trim changes the clips, not just the transition: show it as well as announcing it.
-    const say = trimmed ? notify : announce;
+    const capped = r.clamped === 'max' ? ` ${describeLimit(getLimits(r.doc, cut))}.` : '';
+    const trimmed = r.trimmed !== NO_ROOM ? describeTrim(r.trimmed, r.transition.duration) : '';
+    const done = r.replaced
+      ? `Changed to ${preset.name}: ${formatDuration(r.transition.duration)}, ${draft ? 'with its settings' : 'Feel kept'}.`
+      : `${preset.name} applied: ${formatDuration(r.transition.duration)}, centred on the cut.`;
     if (r.doc === doc) announce(`${preset.name} selected`);
-    else if (r.replaced) say(`Changed to ${preset.name}: ${formatDuration(r.transition.duration)}, ${draft ? 'with its settings' : 'Feel kept'}.${trimmed}${capped}`);
-    else say(`${preset.name} applied: ${formatDuration(r.transition.duration)}, centred on the cut.${trimmed}${capped}`);
+    // A trim changes the clips, not just the transition: show it too. The toast leaves out what was
+    // applied (it's on the timeline) and says only the surprise; the announcement says both.
+    else if (trimmed) notify(`${done} ${trimmed}${capped}`, `${trimmed}${capped}`);
+    else announce(`${done}${capped}`);
   };
 
   const removeTransitionAt = (cutKey: string) => {
@@ -979,7 +981,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
       : !targetCut
         ? NO_TARGET
         : limits && !limits.canTransition
-          ? describeNoHandles(targetCut, limits)
+          ? describeNoHandles(limits)
           : null;
   // Nothing chosen yet is a prompt, not a problem.
   const noticeTone = cutList.length > 0 && !targetCut ? 'info' : 'warn';
@@ -994,7 +996,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     : !dragValid
       ? `Clips too short at Cut ${dragCut.index + 1}`
       : `${transitionAt(doc, dragCut.key) ? 'Replace at' : 'Apply to'} Cut ${dragCut.index + 1}` +
-        (dragRoom !== NO_ROOM ? ` · trims ${describeRoom(dragCut, dragRoom)}` : '');
+        (dragRoom !== NO_ROOM ? ` · trims ${describeRoom(dragRoom)}` : '');
   // Frames that applying a preset would trim off the clips, shaded on the timeline.
   // Shade what a preset would trim only while that preset is in focus: hovered, or open in its settings.
   const trimFocusId = hoverId ?? (tuningId && !tuningLive ? tuningId : null);
@@ -1015,7 +1017,7 @@ export function Editor({ baseDoc, sources, feeder, thumbs, controller, ready, re
     for (const p of PRESETS) {
       const draft = drafts[p.id];
       const r = applyTransition(doc, cut.key, p.id, { feel: TRANSITION_DEFAULTS.feel, duration: TRANSITION_DEFAULTS.duration, ...(draft && { look: draft }) });
-      if (r.ok && r.trimmed !== NO_ROOM) notes[p.id] = describeTrimWarning(cut, r.trimmed, r.transition.duration);
+      if (r.ok && r.trimmed !== NO_ROOM) notes[p.id] = describeTrimWarning(r.trimmed, r.transition.duration);
     }
     return notes;
   }, [doc, drafts, targetKey]);

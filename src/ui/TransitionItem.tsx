@@ -112,7 +112,7 @@ export function TransitionItem(props: Props) {
     setLimitHit(r.clamped);
     if (r.clamped === 'max' && !d.announcedLimit) {
       d.announcedLimit = true;
-      props.announce(describeLimit(cut, limits));
+      props.announce(describeLimit(limits));
     }
     if (r.clamped !== 'max') d.announcedLimit = false;
     const next = setDuration(d.baseDoc, cut.key, r.duration);
@@ -129,7 +129,7 @@ export function TransitionItem(props: Props) {
     setLimitHit(null);
     props.gesture.end('Change duration');
     props.onGestureActive(false);
-    if (d.trimmed !== NO_ROOM) props.notify(describeTrim(cut, d.trimmed, d.duration));
+    if (d.trimmed !== NO_ROOM) props.notify(describeTrim(d.trimmed, d.duration));
   };
 
   const onEdgeKey = (edge: Edge) => (e: KeyboardEvent) => {
@@ -147,14 +147,14 @@ export function TransitionItem(props: Props) {
     const r = props.onStepDuration(requested);
     setLimitHit(r.clamped);
     setStepped(true);
-    if (r.clamped === 'max') props.announce(describeLimit(cut, limits));
+    if (r.clamped === 'max') props.announce(describeLimit(limits));
     else if (r.clamped === 'min') props.announce(describeMinimum(limits));
   };
 
   const name = getPreset(t.presetId).name;
   // Focus alone doesn't show it: a drag leaves the edge focused after release.
   const showTooltip = dragEdge !== null || (edgeFocused !== null && stepped);
-  const reason = limitHit === 'max' ? describeLimit(cut, limits) : limitHit === 'min' ? describeMinimum(limits) : null;
+  const reason = limitHit === 'max' ? describeLimit(limits) : limitHit === 'min' ? describeMinimum(limits) : null;
 
   return (
     <>

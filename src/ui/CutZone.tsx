@@ -7,6 +7,8 @@ interface Props {
   ready: boolean;
   /** This cut is the Transitions picker's target and the picker is in use. */
   engaged: boolean;
+  /** A placeholder for a transition is already on this cut: hide the + (kept mounted, so focus can come back to it). */
+  covered: boolean;
   pickerId: string;
   buttonRef?: Ref<HTMLButtonElement>;
   onHover: (hover: boolean) => void;
@@ -15,10 +17,10 @@ interface Props {
 }
 
 /** The + that appears on a cut without a transition. */
-export function CutZone({ cut, left, ready, engaged, pickerId, buttonRef, onHover, onFocusChange, onChoose }: Props) {
+export function CutZone({ cut, left, ready, engaged, covered, pickerId, buttonRef, onHover, onFocusChange, onChoose }: Props) {
   return (
     <div
-      className={`cut-zone${engaged ? ' engaged' : ''}`}
+      className={`cut-zone${engaged ? ' engaged' : ''}${covered ? ' covered' : ''}`}
       style={{ left }}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}

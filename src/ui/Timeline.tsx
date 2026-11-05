@@ -25,6 +25,8 @@ import {
 import { boundaryFrame, cutAtFrame, insertionIndex, rulerLabel, tickStep } from '../model/timelineView';
 import { clamp, formatClock, FPS, formatTimecode, type Frames } from '../model/time';
 import { ClipItem, trimLimitText, type TrimFeedback } from './ClipItem';
+import { TrimNote } from './TrimNote';
+import { describeTrimDetail } from '../model/messages';
 import { CutZone } from './CutZone';
 import { useElementWidth } from './hooks';
 import { TransitionItem, type Gesture } from './TransitionItem';
@@ -495,9 +497,22 @@ export function Timeline(props: Props) {
                 // How much of each handle the transition here plays (half its length on each side of the cut).
                 const aUsed = Math.min(half, aTail);
                 const bUsed = Math.min(half, bHead);
-                // Before a transition is applied, a handle can be shorter than it needs: say so (applying trims the clip).
-                const usage = (handle: Frames, used: Frames) =>
-                  duration === 0 ? `${handle} f` : half > handle ? `${handle} f, needs ${half}` : `${used} of ${handle} f used`;
+                // Before a transition is applied (only a placeholder does this), a handle can be shorter than
+                // it needs: applying trims the clip by the rest. The trim preview on the clip shows those frames.
+                const aShort = Math.max(0, half - aTail);
+                const bShort = Math.max(0, half - bHead);
+                // Labelled by side, not clip name: each strip lies over the other clip, past the cut.
+                // Only once there's a length to measure against (a placeholder or a transition): on a plain
+                // hover the bars alone show what footage there is.
+                const usage = (handle: Frames, used: Frames, short: Frames, edge: string) => {
+                  if (short > 0) return `${handle > 0 ? `${handle} f` : 'none'}, will trim ${short} off its ${edge}`;
+                  // A placeholder hasn't used anything yet: say what applying will use.
+                  return pendingHere ? `will use ${used} of ${handle} f` : `${used} of ${handle} f used`;
+                };
+                const aReach = Math.min(aTail, len - cut.frame);
+                const bReach = Math.min(bHead, cut.frame);
+                const stripClass = (side: 'a' | 'b', reach: Frames) =>
+                  `handle-strip strip-${side}${reach === 0 ? ' empty' : ''}${pendingHere ? ' pending' : ''}`;
                 return (
                   <div
                     key={cut.key}
@@ -505,23 +520,16 @@ export function Timeline(props: Props) {
                   >
                     {showStrips && (
                       <>
-                        <div
-                          className={`handle-strip strip-a${aTail === 0 ? ' empty' : ''}`}
-                          style={{ left: x(cut.frame), width: Math.max(2, x(Math.min(aTail, len - cut.frame))) }}
-                        >
-                          {aUsed > 0 && <span className="handle-used" style={{ width: x(Math.min(aUsed, len - cut.frame)) }} />}
-                          <span className="handle-label">
-                            {cut.from.label} tail · {usage(aTail, aUsed)}
-                          </span>
+                        <div className={stripClass('a', aReach)} style={{ left: x(cut.frame), width: Math.max(2, x(aReach)) }}>
+                          {aUsed > 0 && <span className="handle-used" style={{ width: x(Math.min(aUsed, aReach)) }} />}
+                          {duration > 0 && <span className="handle-label">Left clip · {usage(aTail, aUsed, aShort, 'end')}</span>}
                         </div>
                         <div
-                          className={`handle-strip strip-b${bHead === 0 ? ' empty' : ''}`}
-                          style={{ left: x(cut.frame - Math.min(bHead, cut.frame)), width: Math.max(2, x(Math.min(bHead, cut.frame))) }}
+                          className={stripClass('b', bReach)}
+                          style={{ left: x(cut.frame - bReach), width: Math.max(2, x(bReach)) }}
                         >
-                          {bUsed > 0 && <span className="handle-used" style={{ width: x(Math.min(bUsed, cut.frame)) }} />}
-                          <span className="handle-label">
-                            {cut.to.label} head · {usage(bHead, bUsed)}
-                          </span>
+                          {bUsed > 0 && <span className="handle-used" style={{ width: x(Math.min(bUsed, bReach)) }} />}
+                          {duration > 0 && <span className="handle-label">Right clip · {usage(bHead, bUsed, bShort, 'start')}</span>}
                         </div>
                       </>
                     )}
@@ -547,6 +555,14 @@ export function Timeline(props: Props) {
                         )}
                       </>
                     )}
+                    {t?.madeRoom &&
+                      (['a', 'b'] as const).map((side) => {
+                        const trimmed = t.madeRoom![side];
+                        if (trimmed <= 0) return null;
+                        const clip = side === 'a' ? cut.from.label : cut.to.label;
+                        const note = describeTrimDetail(clip, side, trimmed, side === 'a' ? aTail : bHead, getPreset(t.presetId).name);
+                        return <TrimNote key={side} side={side} cutX={x(cut.frame)} trimmed={trimmed} {...note} />;
+                      })}
                     {t ? (
                       <TransitionItem
                         doc={doc}
@@ -583,6 +599,7 @@ export function Timeline(props: Props) {
                           left={x(cut.frame)}
                           ready={ready}
                           engaged={(pickerActive && targetCutKey === cut.key) || (dropHere && props.dropCutValid)}
+                          covered={pendingHere}
                           pickerId={props.pickerId}
                           buttonRef={(el) => {
                             if (el) props.cutEls.set(cut.key, el);
